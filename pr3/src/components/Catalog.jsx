@@ -53,8 +53,8 @@ export default function Catalog() {
         <section>
             <div className="page-title">
                 <div>
-                    <h1>Каталог услуг</h1>
-                    <p>Ремонт и обслуживание компьютеров</p>
+                    <h1>Каталог воздуха</h1>
+                    <p>Свежий воздух со всего мира — в банке, с доставкой</p>
                 </div>
                 {Number(user?.discount_percent) > 0 && (
                     <div className="discount-info">

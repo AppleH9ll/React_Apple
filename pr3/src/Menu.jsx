@@ -10,7 +10,7 @@ export default function Menu() {
 
     return (
         <header className="navbar">
-            <NavLink to="/" className="logo">Сервисный центр</NavLink>
+            <NavLink to="/" className="logo">AirShop</NavLink>
 
             <nav>
                 <NavLink to="/" end>Каталог</NavLink>

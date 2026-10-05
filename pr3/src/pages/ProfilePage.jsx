@@ -4,8 +4,10 @@ import { useAuth } from '../context/AuthContext';
 
 export default function ProfilePage() {
     const { user, update } = useAuth();
+
     const [orders, setOrders] = useState([]);
     const [loadingOrders, setLoadingOrders] = useState(true);
+    const [ordersError, setOrdersError] = useState('');
     const [tab, setTab] = useState('orders');
 
     const [email, setEmail] = useState(user.email || '');
@@ -20,17 +22,28 @@ export default function ProfilePage() {
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState({ type: '', text: '' });
 
+    // Синхронизация полей формы, если данные user обновились
+    useEffect(() => {
+        setEmail(user.email || '');
+        setFirstName(user.first_name || '');
+        setLastName(user.last_name || '');
+        setAddress(user.address || '');
+        setPhone(user.phone || '');
+    }, [user]);
+
     useEffect(() => {
         loadOrders();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     async function loadOrders() {
         try {
             setLoadingOrders(true);
+            setOrdersError('');
             const data = await api.userOrders(user.user_id);
             setOrders(data);
         } catch (err) {
-            console.error(err);
+            setOrdersError(err.message);
         } finally {
             setLoadingOrders(false);
         }
@@ -56,7 +69,13 @@ export default function ProfilePage() {
                 address: address.trim(),
                 phone: phone.trim(),
             });
-            update({ ...user, ...updated });
+            // Сохраняем роль и скидку, если бэкенд их не вернул
+            update({
+                ...user,
+                ...updated,
+                role_name: user.role_name,
+                discount_percent: updated.discount_percent ?? user.discount_percent,
+            });
             showMessage('success', 'Профиль сохранён');
         } catch (err) {
             showMessage('error', err.message);
@@ -88,6 +107,8 @@ export default function ProfilePage() {
         }
     }
 
+    const userDiscount = Number(user?.discount_percent) || 0;
+
     return (
         <div className="profile-page">
             <div className="profile-header">
@@ -102,54 +123,100 @@ export default function ProfilePage() {
                     </h1>
                     <p className="profile-email">{user.email}</p>
                     {user.address && <p className="profile-address">{user.address}</p>}
+                    {userDiscount > 0 && (
+                        <p className="profile-discount">
+                            Персональная скидка: <b>{userDiscount}%</b>
+                        </p>
+                    )}
                 </div>
             </div>
 
             <div className="profile-tabs">
-                <button className={tab === 'orders' ? 'active' : ''} onClick={() => setTab('orders')}>
+                <button
+                    className={tab === 'orders' ? 'active' : ''}
+                    onClick={() => setTab('orders')}
+                >
                     Мои заказы ({orders.length})
                 </button>
-                <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')}>
+                <button
+                    className={tab === 'settings' ? 'active' : ''}
+                    onClick={() => setTab('settings')}
+                >
                     Настройки профиля
                 </button>
             </div>
 
-            {message.text && <div className={`profile-message ${message.type}`}>{message.text}</div>}
+            {message.text && (
+                <div className={`profile-message ${message.type}`}>{message.text}</div>
+            )}
 
-            {tab === 'orders' && <OrdersTab orders={orders} loading={loadingOrders} />}
+            {tab === 'orders' && (
+                <OrdersTab
+                    orders={orders}
+                    loading={loadingOrders}
+                    error={ordersError}
+                    onRetry={loadOrders}
+                />
+            )}
 
             {tab === 'settings' && (
                 <div className="profile-settings">
                     <form onSubmit={handleSaveProfile} className="profile-card">
                         <h3>Личные данные</h3>
+
                         <div className="form-row">
                             <div className="form-group">
                                 <label>Email (логин)</label>
-                                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                                <input
+                                    type="email"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    required
+                                />
                             </div>
                         </div>
+
                         <div className="form-row two-cols">
                             <div className="form-group">
                                 <label>Имя</label>
-                                <input type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+                                <input
+                                    type="text"
+                                    value={firstName}
+                                    onChange={(e) => setFirstName(e.target.value)}
+                                />
                             </div>
                             <div className="form-group">
                                 <label>Фамилия</label>
-                                <input type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+                                <input
+                                    type="text"
+                                    value={lastName}
+                                    onChange={(e) => setLastName(e.target.value)}
+                                />
                             </div>
                         </div>
+
                         <div className="form-row">
                             <div className="form-group">
                                 <label>Телефон</label>
-                                <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
+                                <input
+                                    type="tel"
+                                    value={phone}
+                                    onChange={(e) => setPhone(e.target.value)}
+                                />
                             </div>
                         </div>
+
                         <div className="form-row">
                             <div className="form-group">
                                 <label>Адрес по умолчанию</label>
-                                <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} />
+                                <input
+                                    type="text"
+                                    value={address}
+                                    onChange={(e) => setAddress(e.target.value)}
+                                />
                             </div>
                         </div>
+
                         <button type="submit" className="btn-primary" disabled={saving}>
                             {saving ? 'Сохранение...' : 'Сохранить изменения'}
                         </button>
@@ -157,19 +224,36 @@ export default function ProfilePage() {
 
                     <form onSubmit={handleChangePassword} className="profile-card">
                         <h3>Смена пароля</h3>
+
                         <div className="form-row">
                             <div className="form-group">
                                 <label>Новый пароль</label>
-                                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+                                <input
+                                    type="password"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    placeholder="Минимум 6 символов"
+                                />
                             </div>
                         </div>
+
                         <div className="form-row">
                             <div className="form-group">
                                 <label>Повторите пароль</label>
-                                <input type="password" value={passwordRepeat} onChange={(e) => setPasswordRepeat(e.target.value)} />
+                                <input
+                                    type="password"
+                                    value={passwordRepeat}
+                                    onChange={(e) => setPasswordRepeat(e.target.value)}
+                                    placeholder="Повторите пароль"
+                                />
                             </div>
                         </div>
-                        <button type="submit" className="btn-primary" disabled={saving || !password}>
+
+                        <button
+                            type="submit"
+                            className="btn-primary"
+                            disabled={saving || !password || !passwordRepeat}
+                        >
                             {saving ? 'Сохранение...' : 'Изменить пароль'}
                         </button>
                     </form>
@@ -179,40 +263,77 @@ export default function ProfilePage() {
     );
 }
 
-function OrdersTab({ orders, loading }) {
+function OrdersTab({ orders, loading, error, onRetry }) {
     const [expanded, setExpanded] = useState(null);
 
-    if (loading) return <div className="profile-card">Загрузка заказов...</div>;
-    if (orders.length === 0) return <div className="profile-card empty-state">У вас пока нет заказов</div>;
+    if (loading) {
+        return <div className="profile-card">Загрузка заказов...</div>;
+    }
+
+    if (error) {
+        return (
+            <div className="profile-card">
+                <div className="profile-message error">
+                    Ошибка загрузки: {error}
+                </div>
+                <button className="btn-primary" onClick={onRetry}>
+                    Попробовать снова
+                </button>
+            </div>
+        );
+    }
+
+    if (orders.length === 0) {
+        return (
+            <div className="profile-card empty-state">
+                У вас пока нет заказов
+            </div>
+        );
+    }
 
     return (
         <div className="orders-list">
             {orders.map(order => {
                 const isOpen = expanded === order.order_id;
                 const totalItems = order.items.reduce((s, i) => s + i.quantity, 0);
-                const totalOriginal = order.items.reduce((s, i) => s + parseFloat(i.price) * i.quantity, 0);
+                const totalOriginal = order.items.reduce(
+                    (s, i) => s + parseFloat(i.price) * i.quantity,
+                    0
+                );
+                const totalFinal = parseFloat(order.final_amount);
 
                 return (
                     <div key={order.order_id} className="order-card">
-                        <div className="order-header" onClick={() => setExpanded(isOpen ? null : order.order_id)}>
+                        <div
+                            className="order-header"
+                            onClick={() => setExpanded(isOpen ? null : order.order_id)}
+                        >
                             <div className="order-header-left">
                                 <span className="order-number">Заказ №{order.order_id}</span>
                                 <span className="order-date">
                                     {new Date(order.created_at).toLocaleDateString('ru-RU')}
                                 </span>
                             </div>
+
                             <div className="order-header-center">
                                 <span className="order-items-count">{totalItems} поз.</span>
-                                <span className={`order-status status-${order.status}`}>{order.status}</span>
+                                <span className={`order-status status-${order.status}`}>
+                                    {order.status}
+                                </span>
                             </div>
+
                             <div className="order-header-right">
-                                {order.discount_amount > 0 && (
-                                    <span className="order-old-sum">{totalOriginal.toFixed(0)} ₽</span>
+                                {parseFloat(order.discount_amount) > 0 && (
+                                    <span className="order-old-sum">
+                                        {totalOriginal.toFixed(0)} ₽
+                                    </span>
                                 )}
                                 <span className="order-final-sum">
-                                    {parseFloat(order.final_amount).toFixed(0)} ₽
+                                    {totalFinal.toFixed(0)} ₽
                                 </span>
-                                <span className={`order-chevron ${isOpen ? 'open' : ''}`}>▾</span>
+                                <span className={`order-chevron ${isOpen ? 'open' : ''}`}>
+                                    ▾
+                                </span>
                             </div>
                         </div>
 
@@ -221,32 +342,47 @@ function OrdersTab({ orders, loading }) {
                                 <div className="order-items-list">
                                     {order.items.map((it, idx) => (
                                         <div key={idx} className="order-item-row">
-                                            <div className="order-item-name">{it.service_name || `Услуга #${it.service_id}`}</div>
-                                            <div className="order-item-qty">{it.quantity} шт.</div>
+                                            <div className="order-item-name">
+                                                {it.service_name || `Услуга #${it.service_id}`}
+                                            </div>
+                                            <div className="order-item-qty">
+                                                {it.quantity} шт.
+                                            </div>
                                             <div className="order-item-price">
                                                 {(parseFloat(it.price) * it.quantity).toFixed(0)} ₽
                                             </div>
                                         </div>
                                     ))}
                                 </div>
+
                                 <div className="order-summary-block">
                                     <div className="order-summary-row">
                                         <span>Сумма:</span>
                                         <span>{totalOriginal.toFixed(0)} ₽</span>
                                     </div>
-                                    {order.discount_amount > 0 && (
+
+                                    {parseFloat(order.discount_amount) > 0 && (
                                         <div className="order-summary-row discount">
-                                            <span>Скидка {order.coupon_code && `(${order.coupon_code})`}:</span>
-                                            <span>−{parseFloat(order.discount_amount).toFixed(0)} ₽</span>
+                                            <span>
+                                                Скидка
+                                                {order.coupon_code && ` (${order.coupon_code})`}:
+                                            </span>
+                                            <span>
+                                                −{parseFloat(order.discount_amount).toFixed(0)} ₽
+                                            </span>
                                         </div>
                                     )}
+
                                     <div className="order-summary-row total">
                                         <span>Итого:</span>
-                                        <span>{parseFloat(order.final_amount).toFixed(0)} ₽</span>
+                                        <span>{totalFinal.toFixed(0)} ₽</span>
                                     </div>
                                 </div>
+
                                 {order.address && (
-                                    <div className="order-address"><strong>Адрес:</strong> {order.address}</div>
+                                    <div className="order-address">
+                                        <strong>Адрес:</strong> {order.address}
+                                    </div>
                                 )}
                             </div>
                         )}

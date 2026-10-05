@@ -34,15 +34,26 @@ export default function CartPage() {
         return <Receipt order={order} onBack={() => navigate('/profile')} />;
     }
 
+    // === Расчёты ===
     const totalOriginal = cart.reduce((s, i) => s + parseFloat(i.price) * i.quantity, 0);
-    const totalBeforeDiscount = cart.reduce((s, i) => {
+
+    // Сумма со скидками на услуги
+    const totalBeforeUser = cart.reduce((s, i) => {
         const p = parseFloat(i.price);
         const d = i.discount_percent || 0;
         return s + p * (1 - d / 100) * i.quantity;
     }, 0);
-    const serviceDiscountAmount = totalOriginal - totalBeforeDiscount;
-    const couponAmount = totalBeforeDiscount * (couponDiscount / 100);
-    const totalAfterDiscount = totalBeforeDiscount - couponAmount;
+
+    const serviceDiscountAmount = totalOriginal - totalBeforeUser;
+
+    // Персональная скидка пользователя
+    const userDiscountPercent = Number(user?.discount_percent) || 0;
+    const userDiscountAmount = totalBeforeUser * (userDiscountPercent / 100);
+    const afterUserDiscount = totalBeforeUser - userDiscountAmount;
+
+    // Купон применяется к остатку после персональной скидки
+    const couponAmount = afterUserDiscount * (couponDiscount / 100);
+    const totalAfterDiscount = afterUserDiscount - couponAmount;
 
     async function applyCoupon() {
         setCouponError('');
@@ -79,7 +90,12 @@ export default function CartPage() {
                 couponApplied ? couponCode : null,
                 finalAddress
             );
-            setOrder({ ...created, items: [...cart], address: finalAddress });
+            setOrder({
+                ...created,
+                items: [...cart],
+                address: finalAddress,
+                user_discount_percent: userDiscountPercent,
+            });
         } catch (err) {
             alert(err.message);
         } finally {
@@ -202,10 +218,18 @@ export default function CartPage() {
                                 <span>−{serviceDiscountAmount.toFixed(0)} ₽</span>
                             </div>
                         )}
-                        <div className="cart-row">
-                            <span>Подытог:</span>
-                            <span>{totalBeforeDiscount.toFixed(0)} ₽</span>
-                        </div>
+                        {userDiscountPercent > 0 && (
+                            <>
+                                <div className="cart-row">
+                                    <span>Подытог:</span>
+                                    <span>{totalBeforeUser.toFixed(0)} ₽</span>
+                                </div>
+                                <div className="cart-row discount-row">
+                                    <span>Персональная скидка ({userDiscountPercent}%):</span>
+                                    <span>−{userDiscountAmount.toFixed(0)} ₽</span>
+                                </div>
+                            </>
+                        )}
                         {couponApplied && (
                             <div className="cart-row discount-row">
                                 <span>Купон ({couponDiscount}%):</span>
@@ -235,6 +259,10 @@ function Receipt({ order, onBack }) {
         return s + p * (1 - d / 100) * i.quantity;
     }, 0);
     const serviceDiscount = totalOriginal - totalFinal;
+
+    const userDiscountPercent = order.user_discount_percent || 0;
+    const userDiscountAmount = totalFinal * (userDiscountPercent / 100);
+    const afterUser = totalFinal - userDiscountAmount;
 
     return (
         <div className="receipt-page">
@@ -278,6 +306,12 @@ function Receipt({ order, onBack }) {
                         <div className="receipt-row discount">
                             <span>Скидки на услуги:</span>
                             <span>−{serviceDiscount.toFixed(0)} ₽</span>
+                        </div>
+                    )}
+                    {userDiscountPercent > 0 && (
+                        <div className="receipt-row discount">
+                            <span>Персональная скидка ({userDiscountPercent}%):</span>
+                            <span>−{userDiscountAmount.toFixed(0)} ₽</span>
                         </div>
                     )}
                     {order.discount_amount > 0 && (

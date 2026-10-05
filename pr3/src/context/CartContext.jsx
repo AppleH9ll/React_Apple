@@ -39,12 +39,14 @@ export function CartProvider({ children }) {
     };
 
     const updateQty = async (cartId, quantity) => {
-        await api.updateCartQuantity(cartId, quantity);
+        if (!user) throw new Error('Требуется авторизация');
+        await api.updateCartQuantity(cartId, quantity, user.user_id);
         await reload();
     };
 
     const remove = async (cartId) => {
-        await api.removeFromCart(cartId);
+        if (!user) throw new Error('Требуется авторизация');
+        await api.removeFromCart(cartId, user.user_id);
         await reload();
     };
 

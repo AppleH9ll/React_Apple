@@ -27,7 +27,7 @@ export default function AdminAppointments() {
 
     return (
         <section className="admin-section">
-            <h1>Записи на услуги</h1>
+            <h1>Заказы</h1>
             {error && <div className="admin-message error">{error}</div>}
             <div className="admin-table">
                 {items.map(a => (

@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import Menu from './Menu';
 import AdminPanel from './AdminPanel';
@@ -20,45 +20,78 @@ import AdminSearch from './components/AdminSearch';
 
 import './App.css';
 
+function ProtectedRoute({ children }) {
+    const { user } = useAuth();
+    const location = useLocation();
+    if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
+    return children;
+}
+
+function AdminRoute({ children }) {
+    const { user } = useAuth();
+    if (!user) return <Navigate to="/login" replace />;
+    if (user.role_name !== 'admin') return <Navigate to="/" replace />;
+    return children;
+}
+
 export default function App() {
     const { user } = useAuth();
-
-    if (!user) return <Login />;
-
-    const admin = user.role_name === 'admin';
+    const isAdmin = user?.role_name === 'admin';
 
     return (
         <div className="app">
-            {admin ? <AdminPanel /> : <Menu />}
-
-            <main className="content">
+            {!user ? (
                 <Routes>
-                    <Route path="/" element={<Catalog />} />
-                    <Route path="/service/:id" element={<ServicePage />} />
-
-                    {!admin && (
-                        <>
-                            <Route path="/cart" element={<CartPage />} />
-                            <Route path="/profile" element={<ProfilePage />} />
-                        </>
-                    )}
-
-                    {admin && (
-                        <>
-                            <Route path="/admin/categories" element={<AdminCategories />} />
-                            <Route path="/admin/services" element={<AdminServices />} />
-                            <Route path="/admin/users" element={<AdminUsers />} />
-                            <Route path="/admin/appointments" element={<AdminAppointments />} />
-                            <Route path="/admin/roles" element={<AdminRoles />} />
-                            <Route path="/admin/coupons" element={<AdminCoupons />} />
-                            <Route path="/admin/certificates" element={<AdminCertificates />} />
-                            <Route path="/admin/search" element={<AdminSearch />} />
-                        </>
-                    )}
-
-                    <Route path="*" element={<Navigate to="/" replace />} />
+                    <Route path="/login" element={<Login />} />
+                    <Route path="*" element={<Navigate to="/login" replace />} />
                 </Routes>
-            </main>
+            ) : (
+                <>
+                    {isAdmin ? <AdminPanel /> : <Menu />}
+
+                    <main className="content">
+                        <Routes>
+                            <Route
+                                path="/"
+                                element={<ProtectedRoute><Catalog /></ProtectedRoute>}
+                            />
+                            <Route
+                                path="/service/:id"
+                                element={<ProtectedRoute><ServicePage /></ProtectedRoute>}
+                            />
+
+                            {!isAdmin && (
+                                <>
+                                    <Route
+                                        path="/cart"
+                                        element={<ProtectedRoute><CartPage /></ProtectedRoute>}
+                                    />
+                                    <Route
+                                        path="/profile"
+                                        element={<ProtectedRoute><ProfilePage /></ProtectedRoute>}
+                                    />
+                                </>
+                            )}
+
+                            {isAdmin && (
+                                <>
+                                    <Route path="/admin/categories" element={<AdminRoute><AdminCategories /></AdminRoute>} />
+                                    <Route path="/admin/services" element={<AdminRoute><AdminServices /></AdminRoute>} />
+                                    <Route path="/admin/users" element={<AdminRoute><AdminUsers /></AdminRoute>} />
+                                    <Route path="/admin/appointments" element={<AdminRoute><AdminAppointments /></AdminRoute>} />
+                                    <Route path="/admin/roles" element={<AdminRoute><AdminRoles /></AdminRoute>} />
+                                    <Route path="/admin/coupons" element={<AdminRoute><AdminCoupons /></AdminRoute>} />
+                                    <Route path="/admin/certificates" element={<AdminRoute><AdminCertificates /></AdminRoute>} />
+                                    <Route path="/admin/search" element={<AdminRoute><AdminSearch /></AdminRoute>} />
+                                </>
+                            )}
+
+                            <Route path="/login" element={<Navigate to="/" replace />} />
+                            <Route path="*" element={<Navigate to="/" replace />} />
+                        </Routes>
+                    </main>
+                </>
+            )}
         </div>
     );
 }

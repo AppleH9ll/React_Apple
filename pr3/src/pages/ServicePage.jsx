@@ -43,7 +43,7 @@ export default function ServicePage() {
     if (error || !service) {
         return (
             <div className="empty-state">
-                <h2>Услуга не найдена</h2>
+                <h2>Товар не найден</h2>
                 <Link to="/" className="btn-primary">К каталогу</Link>
             </div>
         );

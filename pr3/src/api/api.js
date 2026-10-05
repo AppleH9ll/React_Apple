@@ -1,12 +1,19 @@
 const API = 'http://localhost:3001/api';
 
+// Токен для админских запросов — тот же, что в backend/.env
+const ADMIN_TOKEN = 'my-super-secret-admin-token-2026';
+
 async function request(url, options = {}) {
+    const isAdminRequest = options.admin === true;
+    const { admin, ...fetchOptions } = options;
+
     const response = await fetch(API + url, {
         headers: {
             'Content-Type': 'application/json',
-            ...(options.headers || {}),
+            ...(isAdminRequest ? { 'x-admin-token': ADMIN_TOKEN } : {}),
+            ...(fetchOptions.headers || {}),
         },
-        ...options,
+        ...fetchOptions,
     });
 
     const data = await response.json().catch(() => ({}));
@@ -17,11 +24,13 @@ async function request(url, options = {}) {
 }
 
 export const api = {
+    // --- авторизация ---
     login: (email, password) =>
         request('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
     register: (data) =>
         request('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
 
+    // --- услуги ---
     services: (filters = {}) => {
         const params = new URLSearchParams();
         if (filters.category_id) params.append('category_id', filters.category_id);
@@ -33,47 +42,55 @@ export const api = {
         return request(`/services${qs ? '?' + qs : ''}`);
     },
     serviceById: (id) => request(`/services/${id}`),
-    addService: (data) => request('/services', { method: 'POST', body: JSON.stringify(data) }),
-    updateService: (id, data) => request(`/services/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-    deleteService: (id) => request(`/services/${id}`, { method: 'DELETE' }),
+    addService: (data) => request('/services', { method: 'POST', body: JSON.stringify(data), admin: true }),
+    updateService: (id, data) => request(`/services/${id}`, { method: 'PUT', body: JSON.stringify(data), admin: true }),
+    deleteService: (id) => request(`/services/${id}`, { method: 'DELETE', admin: true }),
 
+    // --- категории ---
     categories: () => request('/categories'),
-    addCategory: (data) => request('/categories', { method: 'POST', body: JSON.stringify(data) }),
-    updateCategory: (id, data) => request(`/categories/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-    deleteCategory: (id) => request(`/categories/${id}`, { method: 'DELETE' }),
+    addCategory: (data) => request('/categories', { method: 'POST', body: JSON.stringify(data), admin: true }),
+    updateCategory: (id, data) => request(`/categories/${id}`, { method: 'PUT', body: JSON.stringify(data), admin: true }),
+    deleteCategory: (id) => request(`/categories/${id}`, { method: 'DELETE', admin: true }),
 
+    // --- корзина ---
     getCart: (userId) => request(`/cart/${userId}`),
     addToCart: (userId, serviceId, quantity = 1) =>
         request('/cart', { method: 'POST', body: JSON.stringify({ user_id: userId, service_id: serviceId, quantity }) }),
-    updateCartQuantity: (cartId, quantity) =>
-        request(`/cart/${cartId}`, { method: 'PATCH', body: JSON.stringify({ quantity }) }),
-    removeFromCart: (cartId) => request(`/cart/${cartId}`, { method: 'DELETE' }),
+    updateCartQuantity: (cartId, quantity, userId) =>
+        request(`/cart/${cartId}`, { method: 'PATCH', body: JSON.stringify({ quantity, user_id: userId }) }),
+    removeFromCart: (cartId, userId) =>
+        request(`/cart/${cartId}?user_id=${userId}`, { method: 'DELETE' }),
     clearCart: (userId) => request(`/cart/user/${userId}`, { method: 'DELETE' }),
 
+    // --- заказы ---
     createOrder: (userId, couponCode = null, address = null) =>
         request('/orders', { method: 'POST', body: JSON.stringify({ user_id: userId, coupon_code: couponCode, address }) }),
     userOrders: (userId) => request(`/users/${userId}/orders`),
 
+    // --- купоны ---
     coupons: () => request('/coupons'),
     validateCoupon: (code) => request(`/coupons/validate?code=${encodeURIComponent(code)}`),
-    addCoupon: (data) => request('/coupons', { method: 'POST', body: JSON.stringify(data) }),
-    updateCoupon: (id, data) => request(`/coupons/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-    deleteCoupon: (id) => request(`/coupons/${id}`, { method: 'DELETE' }),
+    addCoupon: (data) => request('/coupons', { method: 'POST', body: JSON.stringify(data), admin: true }),
+    updateCoupon: (id, data) => request(`/coupons/${id}`, { method: 'PUT', body: JSON.stringify(data), admin: true }),
+    deleteCoupon: (id) => request(`/coupons/${id}`, { method: 'DELETE', admin: true }),
 
+    // --- сертификаты ---
     certificates: () => request('/certificates'),
-    addCertificate: (data) => request('/certificates', { method: 'POST', body: JSON.stringify(data) }),
-    updateCertificate: (id, data) => request(`/certificates/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-    deleteCertificate: (id) => request(`/certificates/${id}`, { method: 'DELETE' }),
+    addCertificate: (data) => request('/certificates', { method: 'POST', body: JSON.stringify(data), admin: true }),
+    updateCertificate: (id, data) => request(`/certificates/${id}`, { method: 'PUT', body: JSON.stringify(data), admin: true }),
+    deleteCertificate: (id) => request(`/certificates/${id}`, { method: 'DELETE', admin: true }),
 
+    // --- пользователи ---
     user: (id) => request(`/users/${id}`),
-    users: () => request('/users'),
+    users: () => request('/users', { admin: true }),
     updateUser: (id, data) => request(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
-    search: (type, q) => request(`/admin/search?type=${type}&q=${encodeURIComponent(q)}`),
+    // --- поиск и роли ---
+    search: (type, q) => request(`/admin/search?type=${type}&q=${encodeURIComponent(q)}`, { admin: true }),
+    roles: () => request('/roles', { admin: true }),
 
-    roles: () => request('/roles'),
-
-    appointments: () => request('/appointments'),
+    // --- записи ---
+    appointments: () => request('/appointments', { admin: true }),
     addAppointment: (data) => request('/appointments', { method: 'POST', body: JSON.stringify(data) }),
-    deleteAppointment: (id) => request(`/appointments/${id}`, { method: 'DELETE' }),
+    deleteAppointment: (id) => request(`/appointments/${id}`, { method: 'DELETE', admin: true }),
 };

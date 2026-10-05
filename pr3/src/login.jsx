@@ -1,9 +1,14 @@
 import { useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { api } from './api/api';
 
 export default function Login() {
     const { login } = useAuth();
+    const navigate = useNavigate();
+    const location = useLocation();
+    const from = location.state?.from?.pathname || '/';
+
     const [mode, setMode] = useState('login');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -35,8 +40,10 @@ export default function Login() {
                     last_name: lastName,
                 });
             }
-            const user = await api.login(email, password);
-            login(user);
+            const result = await api.login(email, password);
+            // result = { user, token }
+            login(result);
+            navigate(from, { replace: true });
         } catch (err) {
             setError(err.message);
         } finally {
@@ -47,7 +54,7 @@ export default function Login() {
     return (
         <div className="login-page">
             <form className="login-card" onSubmit={submit}>
-                <h1>Сервисный центр</h1>
+                <h1>AirShop</h1>
                 <p>{mode === 'login' ? 'Вход в личный кабинет' : 'Регистрация'}</p>
 
                 <div className="auth-tabs">

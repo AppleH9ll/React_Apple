@@ -8,7 +8,7 @@ export default function AdminPanel() {
 
     return (
         <header className="navbar admin-navbar">
-            <NavLink to="/" className="logo">Сервисный центр — Админ</NavLink>
+            <NavLink to="/" className="logo">AirShop — Админ</NavLink>
 
             <nav>
                 <NavLink to="/" end>Каталог</NavLink>

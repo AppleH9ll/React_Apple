@@ -70,13 +70,13 @@ export default function AdminServices() {
 
     return (
         <section className="admin-section">
-            <h1>Управление услугами</h1>
+            <h1>Управление товарами</h1>
 
             {error && <div className="admin-message error">{error}</div>}
 
             <form className="admin-form-grid" onSubmit={save}>
-                <input name="service_name" value={form.service_name} onChange={change} placeholder="Название" required />
-                <input name="duration_minutes" type="number" value={form.duration_minutes} onChange={change} placeholder="Длительность (мин)" required />
+                <input name="service_name" value={form.service_name} onChange={change} placeholder="Название товара" required />
+                <input name="duration_minutes" type="number" value={form.duration_minutes} onChange={change} placeholder="Объём (мл)" required />
                 <input name="price" type="number" value={form.price} onChange={change} placeholder="Цена" required />
                 <select name="category_id" value={form.category_id} onChange={change} required>
                     <option value="">Выберите категорию</option>
@@ -88,7 +88,7 @@ export default function AdminServices() {
                 <input name="image_url" value={form.image_url} onChange={change} placeholder="URL фото" className="admin-form-wide" />
                 <textarea name="description" value={form.description} onChange={change} placeholder="Описание" className="admin-form-wide" rows={2} required />
                 <button className="btn-primary admin-form-wide">
-                    {editing ? 'Сохранить изменения' : 'Добавить услугу'}
+                    {editing ? 'Сохранить изменения' : 'Добавить товар'}
                 </button>
                 {editing && (
                     <button

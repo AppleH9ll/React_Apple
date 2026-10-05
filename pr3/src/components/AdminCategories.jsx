@@ -87,7 +87,7 @@ export default function AdminCategories() {
     return (
         <section className="admin-section">
             <div className="admin-section-header">
-                <h2>Категории услуг</h2>
+                <h2>Категории товаров</h2>
                 <p className="admin-section-hint">Названия категорий должны быть уникальны</p>
             </div>
 

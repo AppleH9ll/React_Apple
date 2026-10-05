@@ -68,7 +68,7 @@ function ServiceCard({ service }) {
                 <p className="service-description">{service.description}</p>
 
                 <div className="service-details">
-                    <span>{service.duration_minutes} мин</span>
+                    <span>{service.duration_minutes} мл</span>
                     {service.category_name && <span>{service.category_name}</span>}
                 </div>
 
