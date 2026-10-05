@@ -1,20 +1,32 @@
 const API = 'http://localhost:3001/api';
-
-// Токен для админских запросов — тот же, что в backend/.env
 const ADMIN_TOKEN = 'my-super-secret-admin-token-2026';
+
+const SERVER_DOWN_MESSAGE =
+    'Сервер временно недоступен. Возможно, ведутся технические работы. Попробуйте через пару минут.';
 
 async function request(url, options = {}) {
     const isAdminRequest = options.admin === true;
     const { admin, ...fetchOptions } = options;
 
-    const response = await fetch(API + url, {
-        headers: {
-            'Content-Type': 'application/json',
-            ...(isAdminRequest ? { 'x-admin-token': ADMIN_TOKEN } : {}),
-            ...(fetchOptions.headers || {}),
-        },
-        ...fetchOptions,
-    });
+    let response;
+    try {
+        response = await fetch(API + url, {
+            headers: {
+                'Content-Type': 'application/json',
+                ...(isAdminRequest ? { 'x-admin-token': ADMIN_TOKEN } : {}),
+                ...(fetchOptions.headers || {}),
+            },
+            ...fetchOptions,
+        });
+    } catch (err) {
+        // fetch выбрасывает TypeError, когда сервер недоступен
+        throw new Error(SERVER_DOWN_MESSAGE);
+    }
+
+    // Проверяем "серверные" статусы — тоже показываем как "тех. работы"
+    if ([502, 503, 504].includes(response.status)) {
+        throw new Error(SERVER_DOWN_MESSAGE);
+    }
 
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -50,7 +62,8 @@ export const api = {
     categories: () => request('/categories'),
     addCategory: (data) => request('/categories', { method: 'POST', body: JSON.stringify(data), admin: true }),
     updateCategory: (id, data) => request(`/categories/${id}`, { method: 'PUT', body: JSON.stringify(data), admin: true }),
-    deleteCategory: (id) => request(`/categories/${id}`, { method: 'DELETE', admin: true }),
+    deleteCategory: (id, cascade = false) =>
+        request(`/categories/${id}${cascade ? '?cascade=true' : ''}`, { method: 'DELETE', admin: true }),
 
     // --- корзина ---
     getCart: (userId) => request(`/cart/${userId}`),
@@ -84,6 +97,10 @@ export const api = {
     user: (id) => request(`/users/${id}`),
     users: () => request('/users', { admin: true }),
     updateUser: (id, data) => request(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    createUser: (data) => request('/users', { method: 'POST', body: JSON.stringify(data), admin: true }),
+    updateUserRole: (id, role_id) =>
+        request(`/users/${id}/role`, { method: 'PUT', body: JSON.stringify({ role_id }), admin: true }),
+    deleteUser: (id) => request(`/users/${id}`, { method: 'DELETE', admin: true }),
 
     // --- поиск и роли ---
     search: (type, q) => request(`/admin/search?type=${type}&q=${encodeURIComponent(q)}`, { admin: true }),

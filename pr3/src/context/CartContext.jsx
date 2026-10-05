@@ -9,10 +9,11 @@ export function CartProvider({ children }) {
     const [cart, setCart] = useState([]);
     const [loading, setLoading] = useState(false);
 
-    const isAdmin = user?.role_name === 'admin';
+    // Сотрудник и админ не имеют корзины
+    const isStaff = user?.role_name === 'admin' || user?.role_name === 'employee';
 
     const reload = useCallback(async () => {
-        if (!user || isAdmin) {
+        if (!user || isStaff) {
             setCart([]);
             return;
         }
@@ -25,7 +26,7 @@ export function CartProvider({ children }) {
         } finally {
             setLoading(false);
         }
-    }, [user, isAdmin]);
+    }, [user, isStaff]);
 
     useEffect(() => {
         reload();
@@ -33,25 +34,28 @@ export function CartProvider({ children }) {
 
     const add = async (serviceId, quantity = 1) => {
         if (!user) throw new Error('Требуется авторизация');
-        if (isAdmin) throw new Error('Администратор не может добавлять в корзину');
+        if (isStaff) throw new Error('Сотрудники и администраторы не могут добавлять товары в корзину');
         await api.addToCart(user.user_id, serviceId, quantity);
         await reload();
     };
 
     const updateQty = async (cartId, quantity) => {
         if (!user) throw new Error('Требуется авторизация');
+        if (isStaff) throw new Error('Сотрудники и администраторы не могут изменять корзину');
         await api.updateCartQuantity(cartId, quantity, user.user_id);
         await reload();
     };
 
     const remove = async (cartId) => {
         if (!user) throw new Error('Требуется авторизация');
+        if (isStaff) throw new Error('Сотрудники и администраторы не могут изменять корзину');
         await api.removeFromCart(cartId, user.user_id);
         await reload();
     };
 
     const clear = async () => {
         if (!user) return;
+        if (isStaff) throw new Error('Сотрудники и администраторы не могут очищать корзину');
         await api.clearCart(user.user_id);
         await reload();
     };
@@ -60,7 +64,7 @@ export function CartProvider({ children }) {
 
     return (
         <CartContext.Provider
-            value={{ cart, loading, totalCount, add, updateQty, remove, clear, reload }}
+            value={{ cart, loading, totalCount, add, updateQty, remove, clear, reload, isStaff }}
         >
             {children}
         </CartContext.Provider>

@@ -896,3 +896,35 @@ body {
   .admin-form-grid { grid-template-columns: 1fr; }
   .admin-search-bar { grid-template-columns: 1fr; }
 }
+
+.admin-table-head-users,
+.admin-table-row-users {
+    grid-template-columns: 1.2fr 1.5fr 1fr 0.8fr 2fr;
+}
+
+.role-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 600;
+}
+.role-admin    { background: #fff3e0; color: #d35400; }
+.role-employee { background: #e3f2fd; color: #1565c0; }
+.role-user     { background: #e8f5e9; color: #2e7d32; }
+
+.admin-table-head-categories,
+.admin-table-row-categories {
+    grid-template-columns: 1.5fr 2fr 0.7fr 2fr;
+}
+
+.add-to-cart-btn:disabled {
+    background: #cbd5e0;
+    color: #4a5568;
+    cursor: not-allowed;
+    opacity: 0.9;
+}
+
+.add-to-cart-btn:disabled:hover {
+    background: #cbd5e0;
+}

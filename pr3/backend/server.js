@@ -29,7 +29,9 @@ const pool = new Pool({
 pool.on('connect', () => console.log('Подключение к PostgreSQL установлено'));
 pool.on('error', (err) => console.error('Ошибка PostgreSQL:', err));
 
-// ==================== MIDDLEWARE ====================
+// =====================================================
+// MIDDLEWARE
+// =====================================================
 function adminOnly(req, res, next) {
     const token = req.headers['x-admin-token'];
     if (!token || token !== ADMIN_TOKEN) {
@@ -38,28 +40,47 @@ function adminOnly(req, res, next) {
     next();
 }
 
-// ==================== АВТОРИЗАЦИЯ ====================
+// Вспомогательная функция: получить информацию о роли по ID
+async function getRoleById(roleId, client = pool) {
+    const r = await client.query(
+        'SELECT role_id, role_name FROM roles WHERE role_id = $1',
+        [roleId]
+    );
+    return r.rows[0] || null;
+}
+
+// =====================================================
+// АВТОРИЗАЦИЯ
+// =====================================================
 app.post('/api/auth/register', async (req, res) => {
     try {
         const { email, password, first_name, last_name, address, phone } = req.body;
         if (!email || !password) return res.status(400).json({ error: 'Email и пароль обязательны' });
+        if (password.length < 6) return res.status(400).json({ error: 'Пароль минимум 6 символов' });
 
         const dup = await pool.query('SELECT 1 FROM users WHERE email = $1', [email]);
         if (dup.rows.length) return res.status(400).json({ error: 'Email уже занят' });
 
+        // Находим роль "user" динамически
+        const userRole = await pool.query(
+            "SELECT role_id FROM roles WHERE role_name = 'user' LIMIT 1"
+        );
+        if (!userRole.rows.length) {
+            return res.status(500).json({ error: 'Роль "user" не найдена в БД' });
+        }
+        const userRoleId = userRole.rows[0].role_id;
+
         const hash = await bcrypt.hash(password, 10);
         const r = await pool.query(
             `INSERT INTO users (email, password_hash, first_name, last_name, address, phone, role_id)
-             VALUES ($1,$2,$3,$4,$5,$6,2)
+             VALUES ($1,$2,$3,$4,$5,$6,$7)
              RETURNING user_id, email, first_name, last_name, address, phone, role_id`,
-            [email, hash, first_name, last_name, address, phone]
+            [email, hash, first_name || null, last_name || null, address || null, phone || null, userRoleId]
         );
-
-        const roleRes = await pool.query('SELECT role_name FROM roles WHERE role_id = $1', [r.rows[0].role_id]);
 
         res.status(201).json({
             ...r.rows[0],
-            role_name: roleRes.rows[0]?.role_name || 'user',
+            role_name: 'user',
             discount_percent: 0,
         });
     } catch (e) {
@@ -87,8 +108,10 @@ app.post('/api/auth/login', async (req, res) => {
 
         const { password_hash, ...clean } = user;
 
-        // Админу выдаём токен для админ-операций
-        const token = clean.role_name === 'admin' ? ADMIN_TOKEN : null;
+        // Токен выдаём админу и сотруднику — им нужен доступ к админ-эндпоинтам
+        const token = (clean.role_name === 'admin' || clean.role_name === 'employee')
+            ? ADMIN_TOKEN
+            : null;
 
         res.json({ user: clean, token });
     } catch (e) {
@@ -97,7 +120,9 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// ==================== УСЛУГИ ====================
+// =====================================================
+// УСЛУГИ (ТОВАРЫ)
+// =====================================================
 app.get('/api/services', async (req, res) => {
     try {
         const { category_id, q, min_price, max_price, sort } = req.query;
@@ -131,7 +156,7 @@ app.get('/api/services/:id', async (req, res) => {
              WHERE s.service_id = $1`,
             [req.params.id]
         );
-        if (!r.rows.length) return res.status(404).json({ error: 'Услуга не найдена' });
+        if (!r.rows.length) return res.status(404).json({ error: 'Товар не найден' });
         res.json(r.rows[0]);
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -141,10 +166,12 @@ app.get('/api/services/:id', async (req, res) => {
 app.post('/api/services', adminOnly, async (req, res) => {
     try {
         const { service_name, description, duration_minutes, price, category_id, image_url, discount_percent } = req.body;
+        if (!service_name || !price) return res.status(400).json({ error: 'Название и цена обязательны' });
+
         const r = await pool.query(
             `INSERT INTO services (service_name, description, duration_minutes, price, category_id, image_url, discount_percent)
              VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-            [service_name, description, duration_minutes, price, category_id, image_url || null, discount_percent || 0]
+            [service_name, description || null, duration_minutes || 0, price, category_id || null, image_url || null, discount_percent || 0]
         );
         res.status(201).json(r.rows[0]);
     } catch (e) {
@@ -159,7 +186,7 @@ app.put('/api/services/:id', adminOnly, async (req, res) => {
             `UPDATE services SET service_name=$1, description=$2, duration_minutes=$3, price=$4,
                                  category_id=$5, image_url=$6, discount_percent=$7
              WHERE service_id=$8 RETURNING *`,
-            [service_name, description, duration_minutes, price, category_id, image_url || null, discount_percent || 0, req.params.id]
+            [service_name, description || null, duration_minutes || 0, price, category_id || null, image_url || null, discount_percent || 0, req.params.id]
         );
         if (!r.rows.length) return res.status(404).json({ error: 'Не найдено' });
         res.json(r.rows[0]);
@@ -168,16 +195,48 @@ app.put('/api/services/:id', adminOnly, async (req, res) => {
     }
 });
 
+// Удаление товара с каскадной очисткой cart / appointments
 app.delete('/api/services/:id', adminOnly, async (req, res) => {
+    const client = await pool.connect();
     try {
-        await pool.query('DELETE FROM services WHERE service_id = $1', [req.params.id]);
-        res.json({ message: 'Удалено' });
+        await client.query('BEGIN');
+
+        const check = await client.query(
+            `SELECT 
+                (SELECT COUNT(*)::int FROM cart WHERE service_id = $1) AS in_cart,
+                (SELECT COUNT(*)::int FROM appointments WHERE service_id = $1) AS in_appointments`,
+            [req.params.id]
+        );
+
+        const r = await client.query(
+            'DELETE FROM services WHERE service_id = $1 RETURNING service_id, service_name',
+            [req.params.id]
+        );
+        if (!r.rows.length) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Товар не найден' });
+        }
+
+        await client.query('COMMIT');
+        res.json({
+            message: 'Товар удалён',
+            service: r.rows[0],
+            cascaded: {
+                cart: check.rows[0].in_cart,
+                appointments: check.rows[0].in_appointments,
+            },
+        });
     } catch (e) {
+        await client.query('ROLLBACK');
         res.status(500).json({ error: e.message });
+    } finally {
+        client.release();
     }
 });
 
-// ==================== КАТЕГОРИИ ====================
+// =====================================================
+// КАТЕГОРИИ
+// =====================================================
 app.get('/api/categories', async (_req, res) => {
     try {
         const r = await pool.query('SELECT * FROM categories ORDER BY category_id');
@@ -226,14 +285,59 @@ app.put('/api/categories/:id', adminOnly, async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// КАСКАДНОЕ УДАЛЕНИЕ КАТЕГОРИИ
 app.delete('/api/categories/:id', adminOnly, async (req, res) => {
+    const client = await pool.connect();
     try {
-        await pool.query('DELETE FROM categories WHERE category_id=$1', [req.params.id]);
-        res.json({ message: 'Удалено' });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+        await client.query('BEGIN');
+
+        const cnt = await client.query(
+            'SELECT COUNT(*)::int AS count FROM services WHERE category_id = $1',
+            [req.params.id]
+        );
+        const serviceCount = cnt.rows[0].count;
+
+        if (serviceCount > 0 && req.query.cascade !== 'true') {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+                error: `В категории ${serviceCount} товаров. Требуется каскадное удаление.`,
+                serviceCount,
+                requiresCascade: true,
+            });
+        }
+
+        if (serviceCount > 0) {
+            await client.query(
+                'DELETE FROM services WHERE category_id = $1',
+                [req.params.id]
+            );
+        }
+
+        const r = await client.query(
+            'DELETE FROM categories WHERE category_id = $1 RETURNING category_id, category_name',
+            [req.params.id]
+        );
+        if (!r.rows.length) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Категория не найдена' });
+        }
+
+        await client.query('COMMIT');
+        res.json({
+            message: `Категория "${r.rows[0].category_name}" удалена. Удалено товаров: ${serviceCount}`,
+            deletedServices: serviceCount,
+        });
+    } catch (e) {
+        await client.query('ROLLBACK');
+        res.status(500).json({ error: e.message });
+    } finally {
+        client.release();
+    }
 });
 
-// ==================== КОРЗИНА ====================
+// =====================================================
+// КОРЗИНА
+// =====================================================
 app.get('/api/cart/:userId', async (req, res) => {
     try {
         const r = await pool.query(
@@ -312,7 +416,9 @@ app.delete('/api/cart/user/:userId', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ==================== ЗАКАЗЫ (с персональной скидкой) ====================
+// =====================================================
+// ЗАКАЗЫ (с персональной скидкой)
+// =====================================================
 app.post('/api/orders', async (req, res) => {
     const client = await pool.connect();
     try {
@@ -324,7 +430,6 @@ app.post('/api/orders', async (req, res) => {
             return res.status(400).json({ error: 'user_id обязателен' });
         }
 
-        // Получаем персональную скидку пользователя
         const userRes = await client.query(
             'SELECT discount_percent FROM users WHERE user_id = $1', [user_id]
         );
@@ -345,9 +450,7 @@ app.post('/api/orders', async (req, res) => {
             return res.status(400).json({ error: 'Корзина пуста' });
         }
 
-        // 1. Сумма без скидок
         let subtotal = 0;
-        // 2. Сумма со скидками на услуги
         let afterServiceDiscounts = 0;
 
         for (const it of cartRes.rows) {
@@ -357,11 +460,9 @@ app.post('/api/orders', async (req, res) => {
             afterServiceDiscounts += price * (1 - disc / 100) * it.quantity;
         }
 
-        // 3. Персональная скидка пользователя
         const userDiscountAmount = afterServiceDiscounts * (userDiscount / 100);
         const afterUserDiscount = afterServiceDiscounts - userDiscountAmount;
 
-        // 4. Купон применяется к остатку
         let couponDiscount = 0;
         let couponId = null;
         if (coupon_code) {
@@ -380,8 +481,6 @@ app.post('/api/orders', async (req, res) => {
 
         const couponAmount = afterUserDiscount * (couponDiscount / 100);
         const final = afterUserDiscount - couponAmount;
-
-        // Общая сумма скидок
         const totalDiscount = subtotal - final;
 
         const orderRes = await client.query(
@@ -435,7 +534,9 @@ app.get('/api/users/:id/orders', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ==================== КУПОНЫ ====================
+// =====================================================
+// КУПОНЫ
+// =====================================================
 app.get('/api/coupons', async (_req, res) => {
     try {
         const r = await pool.query('SELECT * FROM coupons ORDER BY coupon_id');
@@ -501,7 +602,9 @@ app.delete('/api/coupons/:id', adminOnly, async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ==================== СЕРТИФИКАТЫ ====================
+// =====================================================
+// СЕРТИФИКАТЫ
+// =====================================================
 app.get('/api/certificates', async (_req, res) => {
     try {
         const r = await pool.query('SELECT * FROM certificates ORDER BY certificate_id');
@@ -545,7 +648,9 @@ app.delete('/api/certificates/:id', adminOnly, async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ==================== ПОЛЬЗОВАТЕЛИ ====================
+// =====================================================
+// ПОЛЬЗОВАТЕЛИ
+// =====================================================
 app.get('/api/users', adminOnly, async (_req, res) => {
     try {
         const r = await pool.query(
@@ -570,6 +675,56 @@ app.get('/api/users/:id', async (req, res) => {
         if (!r.rows.length) return res.status(404).json({ error: 'Не найден' });
         res.json(r.rows[0]);
     } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// СОЗДАНИЕ ПОЛЬЗОВАТЕЛЯ АДМИНОМ
+// Роль проверяется ДИНАМИЧЕСКИ по имени, а не по жёсткому ID
+app.post('/api/users', adminOnly, async (req, res) => {
+    try {
+        const { email, password, first_name, last_name, phone, address, role_id } = req.body;
+
+        if (!email || !password) {
+            return res.status(400).json({ error: 'Email и пароль обязательны' });
+        }
+        if (password.length < 6) {
+            return res.status(400).json({ error: 'Пароль минимум 6 символов' });
+        }
+        if (!role_id) {
+            return res.status(400).json({ error: 'Роль обязательна' });
+        }
+
+        // Проверяем, что роль существует
+        const role = await getRoleById(role_id);
+        if (!role) {
+            return res.status(400).json({ error: `Роль с id=${role_id} не существует` });
+        }
+        // Запрет создавать админов через интерфейс
+        if (role.role_name === 'admin') {
+            return res.status(403).json({
+                error: 'Администраторов можно назначать только через базу данных. Доступны роли: Пользователь, Сотрудник.'
+            });
+        }
+
+        const dup = await pool.query('SELECT 1 FROM users WHERE email = $1', [email]);
+        if (dup.rows.length) return res.status(400).json({ error: 'Email уже занят' });
+
+        const hash = await bcrypt.hash(password, 10);
+        const r = await pool.query(
+            `INSERT INTO users (email, password_hash, first_name, last_name, phone, address, role_id)
+             VALUES ($1,$2,$3,$4,$5,$6,$7)
+             RETURNING user_id, email, first_name, last_name, phone, address, role_id`,
+            [email, hash, first_name || null, last_name || null, phone || null, address || null, role.role_id]
+        );
+
+        res.status(201).json({
+            ...r.rows[0],
+            role_name: role.role_name,
+            discount_percent: 0,
+        });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: e.message });
+    }
 });
 
 app.put('/api/users/:id', async (req, res) => {
@@ -600,11 +755,103 @@ app.put('/api/users/:id', async (req, res) => {
              RETURNING user_id, email, first_name, last_name, address, phone, discount_percent, role_id`,
             [email, first_name, last_name, address, phone, hash, discount_percent, req.params.id]
         );
+        if (!r.rows.length) return res.status(404).json({ error: 'Пользователь не найден' });
         res.json(r.rows[0]);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ==================== РОЛИ ====================
+// СМЕНА РОЛИ — динамическая проверка по имени роли
+app.put('/api/users/:id/role', adminOnly, async (req, res) => {
+    try {
+        const { role_id } = req.body;
+        const rid = Number(role_id);
+
+        if (!rid) return res.status(400).json({ error: 'role_id обязателен' });
+
+        // Проверяем, что новая роль существует
+        const newRole = await getRoleById(rid);
+        if (!newRole) {
+            return res.status(400).json({ error: `Роль с id=${rid} не существует` });
+        }
+
+        // Запрет назначать админа через интерфейс
+        if (newRole.role_name === 'admin') {
+            return res.status(403).json({
+                error: 'Нельзя назначить роль Администратора через интерфейс. Это делается только через БД.'
+            });
+        }
+
+        // Проверка целевого пользователя
+        const target = await pool.query(
+            `SELECT u.role_id, r.role_name FROM users u
+             LEFT JOIN roles r ON u.role_id = r.role_id
+             WHERE u.user_id = $1`,
+            [req.params.id]
+        );
+        if (!target.rows.length) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+
+        // Нельзя менять роль администратору
+        if (target.rows[0].role_name === 'admin') {
+            return res.status(403).json({ error: 'Нельзя изменить роль администратора' });
+        }
+
+        const r = await pool.query(
+            `UPDATE users SET role_id = $1 WHERE user_id = $2
+             RETURNING user_id, email, role_id`,
+            [rid, req.params.id]
+        );
+
+        res.json({ ...r.rows[0], role_name: newRole.role_name });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// УДАЛЕНИЕ ПОЛЬЗОВАТЕЛЯ (каскадное)
+app.delete('/api/users/:id', adminOnly, async (req, res) => {
+    try {
+        const userId = req.params.id;
+
+        const check = await pool.query(
+            `SELECT u.role_id, u.email, r.role_name
+             FROM users u LEFT JOIN roles r ON u.role_id = r.role_id
+             WHERE u.user_id = $1`,
+            [userId]
+        );
+        if (!check.rows.length) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+
+        const row = check.rows[0];
+
+        // Нельзя удалить админа через интерфейс
+        if (row.role_name === 'admin') {
+            return res.status(403).json({
+                error: 'Администраторов можно удалять только через базу данных'
+            });
+        }
+
+        // Каскад: cart, appointments, orders, order_items подчистятся через FK CASCADE
+        const r = await pool.query(
+            'DELETE FROM users WHERE user_id = $1 RETURNING user_id, email',
+            [userId]
+        );
+
+        res.json({
+            message: `Пользователь ${r.rows[0].email} удалён вместе со всеми связанными данными`,
+            user: r.rows[0],
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// =====================================================
+// РОЛИ
+// =====================================================
 app.get('/api/roles', adminOnly, async (_req, res) => {
     try {
         const r = await pool.query('SELECT * FROM roles ORDER BY role_id');
@@ -612,7 +859,9 @@ app.get('/api/roles', adminOnly, async (_req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ==================== ЗАПИСИ ====================
+// =====================================================
+// ЗАПИСИ (APPOINTMENTS)
+// =====================================================
 app.get('/api/appointments', adminOnly, async (_req, res) => {
     try {
         const r = await pool.query(
@@ -645,7 +894,9 @@ app.delete('/api/appointments/:id', adminOnly, async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ==================== ПОИСК ====================
+// =====================================================
+// ПОИСК (админ-панель)
+// =====================================================
 app.get('/api/admin/search', adminOnly, async (req, res) => {
     try {
         const { type, q } = req.query;
@@ -668,6 +919,9 @@ app.get('/api/admin/search', adminOnly, async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// =====================================================
+// ЗАПУСК
+// =====================================================
 app.listen(PORT, () => {
     console.log(`Сервер запущен на http://localhost:${PORT}`);
     console.log(`ADMIN_TOKEN задан: ${ADMIN_TOKEN ? 'да' : 'нет'}`);

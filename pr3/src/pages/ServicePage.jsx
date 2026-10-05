@@ -9,7 +9,7 @@ export default function ServicePage() {
     const { id } = useParams();
     const navigate = useNavigate();
     const { user } = useAuth();
-    const { add } = useCart();
+    const { add, isStaff } = useCart();
 
     const [service, setService] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -17,11 +17,13 @@ export default function ServicePage() {
 
     useEffect(() => {
         loadService();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [id]);
 
     async function loadService() {
         try {
             setLoading(true);
+            setError('');
             const data = await api.serviceById(id);
             setService(data);
         } catch (err) {
@@ -56,6 +58,15 @@ export default function ServicePage() {
 
     const imageSrc = getServiceImage(service);
 
+    let buttonText;
+    if (isStaff) {
+        buttonText = user.role_name === 'admin'
+            ? 'Недоступно для админа'
+            : 'Недоступно для сотрудника';
+    } else {
+        buttonText = '🌬️ Добавить в корзину';
+    }
+
     return (
         <div className="service-page">
             <button className="back-link" onClick={() => navigate(-1)}>← Назад</button>
@@ -81,8 +92,8 @@ export default function ServicePage() {
 
                     <div className="service-page-meta">
                         <div className="meta-item">
-                            <span className="meta-label">Длительность</span>
-                            <span className="meta-value">{service.duration_minutes} мин</span>
+                            <span className="meta-label">Объём банки</span>
+                            <span className="meta-value">{service.duration_minutes} мл</span>
                         </div>
                         {hasDiscount && (
                             <div className="meta-item">
@@ -106,9 +117,10 @@ export default function ServicePage() {
                     <button
                         className="add-to-cart-btn large"
                         onClick={handleAdd}
-                        disabled={user.role_name === 'admin'}
+                        disabled={isStaff}
+                        title={isStaff ? 'Сотрудники и администраторы не могут добавлять товары' : ''}
                     >
-                        {user.role_name === 'admin' ? 'Недоступно для админа' : 'Добавить в корзину'}
+                        {buttonText}
                     </button>
                 </div>
             </div>

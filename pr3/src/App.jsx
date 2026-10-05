@@ -27,16 +27,19 @@ function ProtectedRoute({ children }) {
     return children;
 }
 
-function AdminRoute({ children }) {
+function AdminRoute({ children, allowEmployee = false }) {
     const { user } = useAuth();
     if (!user) return <Navigate to="/login" replace />;
-    if (user.role_name !== 'admin') return <Navigate to="/" replace />;
-    return children;
+    if (user.role_name === 'admin') return children;
+    if (allowEmployee && user.role_name === 'employee') return children;
+    return <Navigate to="/" replace />;
 }
 
 export default function App() {
     const { user } = useAuth();
     const isAdmin = user?.role_name === 'admin';
+    const isEmployee = user?.role_name === 'employee';
+    const hasAdminAccess = isAdmin || isEmployee;
 
     return (
         <div className="app">
@@ -47,42 +50,37 @@ export default function App() {
                 </Routes>
             ) : (
                 <>
-                    {isAdmin ? <AdminPanel /> : <Menu />}
+                    {hasAdminAccess ? <AdminPanel /> : <Menu />}
 
                     <main className="content">
                         <Routes>
-                            <Route
-                                path="/"
-                                element={<ProtectedRoute><Catalog /></ProtectedRoute>}
-                            />
-                            <Route
-                                path="/service/:id"
-                                element={<ProtectedRoute><ServicePage /></ProtectedRoute>}
-                            />
+                            <Route path="/" element={<ProtectedRoute><Catalog /></ProtectedRoute>} />
+                            <Route path="/service/:id" element={<ProtectedRoute><ServicePage /></ProtectedRoute>} />
 
-                            {!isAdmin && (
+                            {!hasAdminAccess && (
                                 <>
-                                    <Route
-                                        path="/cart"
-                                        element={<ProtectedRoute><CartPage /></ProtectedRoute>}
-                                    />
-                                    <Route
-                                        path="/profile"
-                                        element={<ProtectedRoute><ProfilePage /></ProtectedRoute>}
-                                    />
+                                    <Route path="/cart" element={<ProtectedRoute><CartPage /></ProtectedRoute>} />
+                                    <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
                                 </>
                             )}
 
+                            {/* Доступно админу и сотруднику */}
+                            {hasAdminAccess && (
+                                <>
+                                    <Route path="/admin/services" element={<AdminRoute allowEmployee><AdminServices /></AdminRoute>} />
+                                    <Route path="/admin/appointments" element={<AdminRoute allowEmployee><AdminAppointments /></AdminRoute>} />
+                                    <Route path="/admin/search" element={<AdminRoute allowEmployee><AdminSearch /></AdminRoute>} />
+                                    <Route path="/admin/categories" element={<AdminRoute allowEmployee><AdminCategories /></AdminRoute>} />
+                                </>
+                            )}
+
+                            {/* Только админ */}
                             {isAdmin && (
                                 <>
-                                    <Route path="/admin/categories" element={<AdminRoute><AdminCategories /></AdminRoute>} />
-                                    <Route path="/admin/services" element={<AdminRoute><AdminServices /></AdminRoute>} />
                                     <Route path="/admin/users" element={<AdminRoute><AdminUsers /></AdminRoute>} />
-                                    <Route path="/admin/appointments" element={<AdminRoute><AdminAppointments /></AdminRoute>} />
                                     <Route path="/admin/roles" element={<AdminRoute><AdminRoles /></AdminRoute>} />
                                     <Route path="/admin/coupons" element={<AdminRoute><AdminCoupons /></AdminRoute>} />
                                     <Route path="/admin/certificates" element={<AdminRoute><AdminCertificates /></AdminRoute>} />
-                                    <Route path="/admin/search" element={<AdminRoute><AdminSearch /></AdminRoute>} />
                                 </>
                             )}
 

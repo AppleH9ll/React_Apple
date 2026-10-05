@@ -26,7 +26,8 @@ function ServiceList({ services }) {
 
 function ServiceCard({ service }) {
     const { user } = useAuth();
-    const { cart, add } = useCart();
+    const { cart, add, isStaff } = useCart();
+
     const inCart = cart.find(i => i.service_id === service.service_id);
 
     const hasDiscount = service.discount_percent > 0;
@@ -42,6 +43,18 @@ function ServiceCard({ service }) {
         } catch (err) {
             alert(err.message);
         }
+    }
+
+    // Текст кнопки в зависимости от роли
+    let buttonText;
+    if (isStaff) {
+        buttonText = user.role_name === 'admin'
+            ? 'Недоступно для админа'
+            : 'Недоступно для сотрудника';
+    } else if (inCart) {
+        buttonText = `В корзине: ${inCart.quantity}`;
+    } else {
+        buttonText = 'В корзину';
     }
 
     return (
@@ -86,13 +99,10 @@ function ServiceCard({ service }) {
                 <button
                     className="add-to-cart-btn"
                     onClick={handleAdd}
-                    disabled={user.role_name === 'admin'}
+                    disabled={isStaff}
+                    title={isStaff ? 'Сотрудники и администраторы не могут добавлять товары' : ''}
                 >
-                    {user.role_name === 'admin'
-                        ? 'Недоступно для админа'
-                        : inCart
-                        ? `В корзине: ${inCart.quantity}`
-                        : 'В корзину'}
+                    {buttonText}
                 </button>
             </div>
         </div>
