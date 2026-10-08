@@ -64,7 +64,7 @@ export default function ServicePage() {
             ? 'Недоступно для админа'
             : 'Недоступно для сотрудника';
     } else {
-        buttonText = '🌬️ Добавить в корзину';
+        buttonText = 'Добавить в корзину';
     }
 
     return (

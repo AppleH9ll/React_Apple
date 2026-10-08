@@ -290,13 +290,11 @@ app.delete('/api/categories/:id', adminOnly, async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-
         const cnt = await client.query(
             'SELECT COUNT(*)::int AS count FROM services WHERE category_id = $1',
             [req.params.id]
         );
         const serviceCount = cnt.rows[0].count;
-
         if (serviceCount > 0 && req.query.cascade !== 'true') {
             await client.query('ROLLBACK');
             return res.status(409).json({
@@ -305,14 +303,12 @@ app.delete('/api/categories/:id', adminOnly, async (req, res) => {
                 requiresCascade: true,
             });
         }
-
         if (serviceCount > 0) {
             await client.query(
                 'DELETE FROM services WHERE category_id = $1',
                 [req.params.id]
             );
         }
-
         const r = await client.query(
             'DELETE FROM categories WHERE category_id = $1 RETURNING category_id, category_name',
             [req.params.id]
@@ -321,7 +317,6 @@ app.delete('/api/categories/:id', adminOnly, async (req, res) => {
             await client.query('ROLLBACK');
             return res.status(404).json({ error: 'Категория не найдена' });
         }
-
         await client.query('COMMIT');
         res.json({
             message: `Категория "${r.rows[0].category_name}" удалена. Удалено товаров: ${serviceCount}`,

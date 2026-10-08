@@ -14,8 +14,13 @@ export default function CartPage() {
     const [couponDiscount, setCouponDiscount] = useState(0);
     const [couponError, setCouponError] = useState('');
     const [couponApplied, setCouponApplied] = useState(false);
+
     const [address, setAddress] = useState(user?.address || '');
     const [useAnotherAddress, setUseAnotherAddress] = useState(false);
+
+    const [deliveryDate, setDeliveryDate] = useState('');
+    const today = new Date().toISOString().split('T')[0];
+
     const [checkoutLoading, setCheckoutLoading] = useState(false);
     const [order, setOrder] = useState(null);
 
@@ -23,7 +28,8 @@ export default function CartPage() {
         return (
             <div className="cart-page">
                 <div className="empty-state">
-                    <h2>Корзина пуста</h2>
+                    <h2>В корзине пока пусто</h2>
+                    <p className="empty-hint">Загляните в каталог — там вода со всего мира</p>
                     <Link to="/" className="btn-primary">Перейти к каталогу</Link>
                 </div>
             </div>
@@ -35,9 +41,10 @@ export default function CartPage() {
     }
 
     // === Расчёты ===
-    const totalOriginal = cart.reduce((s, i) => s + parseFloat(i.price) * i.quantity, 0);
+    const totalOriginal = cart.reduce(
+        (s, i) => s + parseFloat(i.price) * i.quantity, 0
+    );
 
-    // Сумма со скидками на услуги
     const totalBeforeUser = cart.reduce((s, i) => {
         const p = parseFloat(i.price);
         const d = i.discount_percent || 0;
@@ -46,12 +53,10 @@ export default function CartPage() {
 
     const serviceDiscountAmount = totalOriginal - totalBeforeUser;
 
-    // Персональная скидка пользователя
     const userDiscountPercent = Number(user?.discount_percent) || 0;
     const userDiscountAmount = totalBeforeUser * (userDiscountPercent / 100);
     const afterUserDiscount = totalBeforeUser - userDiscountAmount;
 
-    // Купон применяется к остатку после персональной скидки
     const couponAmount = afterUserDiscount * (couponDiscount / 100);
     const totalAfterDiscount = afterUserDiscount - couponAmount;
 
@@ -78,22 +83,35 @@ export default function CartPage() {
     }
 
     async function handleCheckout() {
-        const finalAddress = useAnotherAddress ? address.trim() : (user?.address || '').trim();
+        const finalAddress = useAnotherAddress
+            ? address.trim()
+            : (user?.address || '').trim();
+
         if (!finalAddress) {
             alert('Укажите адрес доставки');
             return;
         }
+        if (!deliveryDate) {
+            alert('Укажите дату доставки');
+            return;
+        }
+        if (deliveryDate < today) {
+            alert('Дата доставки не может быть в прошлом');
+            return;
+        }
+
         setCheckoutLoading(true);
         try {
             const created = await api.createOrder(
-                user.user_id,
                 couponApplied ? couponCode : null,
-                finalAddress
+                finalAddress,
+                deliveryDate
             );
             setOrder({
                 ...created,
                 items: [...cart],
                 address: finalAddress,
+                delivery_date: deliveryDate,
                 user_discount_percent: userDiscountPercent,
             });
         } catch (err) {
@@ -115,7 +133,7 @@ export default function CartPage() {
                         const finalPrice = price * (1 - discount / 100);
                         const imageSrc = getServiceImage(item);
                         return (
-                            <div key={item.cart_id} className="cart-page-item">
+                            <div key={item.slug} className="cart-page-item">
                                 <img
                                     src={imageSrc || '/placeholder.png'}
                                     alt={item.service_name}
@@ -129,28 +147,36 @@ export default function CartPage() {
                                     <h3>{item.service_name}</h3>
                                     <div className="cart-page-item-details">
                                         <span>{item.duration_minutes} мл</span>
-                                        {discount > 0 && <span className="discount-tag">−{discount}%</span>}
+                                        {discount > 0 && (
+                                            <span className="discount-tag">−{discount}%</span>
+                                        )}
                                     </div>
                                 </div>
 
                                 <div className="cart-page-item-price">
                                     {discount > 0 ? (
                                         <>
-                                            <span className="old-price-small">{(price * item.quantity).toFixed(0)} ₽</span>
-                                            <span className="new-price-small">{(finalPrice * item.quantity).toFixed(0)} ₽</span>
+                                            <span className="old-price-small">
+                                                {(price * item.quantity).toFixed(0)} ₽
+                                            </span>
+                                            <span className="new-price-small">
+                                                {(finalPrice * item.quantity).toFixed(0)} ₽
+                                            </span>
                                         </>
                                     ) : (
-                                        <span className="price-value">{(price * item.quantity).toFixed(0)} ₽</span>
+                                        <span className="price-value">
+                                            {(price * item.quantity).toFixed(0)} ₽
+                                        </span>
                                     )}
                                 </div>
 
                                 <div className="qty-controls">
-                                    <button onClick={() => updateQty(item.cart_id, item.quantity - 1)}>−</button>
+                                    <button onClick={() => updateQty(item.slug, item.quantity - 1)}>−</button>
                                     <span>{item.quantity}</span>
-                                    <button onClick={() => updateQty(item.cart_id, item.quantity + 1)}>+</button>
+                                    <button onClick={() => updateQty(item.slug, item.quantity + 1)}>+</button>
                                 </div>
 
-                                <button className="remove-btn" onClick={() => remove(item.cart_id)}>✕</button>
+                                <button className="remove-btn" onClick={() => remove(item.slug)}>✕</button>
                             </div>
                         );
                     })}
@@ -180,14 +206,18 @@ export default function CartPage() {
                             )}
                         </div>
                         {couponError && <div className="coupon-error">{couponError}</div>}
-                        {couponApplied && <div className="coupon-success">Купон применён: −{couponDiscount}%</div>}
+                        {couponApplied && (
+                            <div className="coupon-success">Купон применён: −{couponDiscount}%</div>
+                        )}
                     </div>
 
                     <div className="address-section">
                         <label>Адрес доставки:</label>
                         {!useAnotherAddress ? (
                             <>
-                                <div className="address-default">{user.address || '— адрес не указан —'}</div>
+                                <div className="address-default">
+                                    {user.address || '— адрес не указан —'}
+                                </div>
                                 <button className="btn-link" onClick={() => setUseAnotherAddress(true)}>
                                     Указать другой адрес
                                 </button>
@@ -207,6 +237,20 @@ export default function CartPage() {
                         )}
                     </div>
 
+                    <div className="address-section">
+                        <label>Дата доставки:</label>
+                        <input
+                            type="date"
+                            value={deliveryDate}
+                            min={today}
+                            onChange={(e) => setDeliveryDate(e.target.value)}
+                            required
+                        />
+                        <small style={{ color: '#888' }}>
+                            Дата не может быть раньше сегодняшней
+                        </small>
+                    </div>
+
                     <div className="cart-summary">
                         <div className="cart-row">
                             <span>Сумма без скидок:</span>
@@ -214,7 +258,7 @@ export default function CartPage() {
                         </div>
                         {serviceDiscountAmount > 0 && (
                             <div className="cart-row discount-row">
-                                <span>Скидки на услуги:</span>
+                                <span>Скидки на товары:</span>
                                 <span>−{serviceDiscountAmount.toFixed(0)} ₽</span>
                             </div>
                         )}
@@ -242,7 +286,11 @@ export default function CartPage() {
                         </div>
                     </div>
 
-                    <button className="checkout-btn" onClick={handleCheckout} disabled={checkoutLoading}>
+                    <button
+                        className="checkout-btn"
+                        onClick={handleCheckout}
+                        disabled={checkoutLoading}
+                    >
                         {checkoutLoading ? 'Оформление...' : 'Оформить заказ'}
                     </button>
                 </aside>
@@ -252,7 +300,9 @@ export default function CartPage() {
 }
 
 function Receipt({ order, onBack }) {
-    const totalOriginal = order.items.reduce((s, i) => s + parseFloat(i.price) * i.quantity, 0);
+    const totalOriginal = order.items.reduce(
+        (s, i) => s + parseFloat(i.price) * i.quantity, 0
+    );
     const totalFinal = order.items.reduce((s, i) => {
         const p = parseFloat(i.price);
         const d = i.discount_percent || 0;
@@ -262,14 +312,12 @@ function Receipt({ order, onBack }) {
 
     const userDiscountPercent = order.user_discount_percent || 0;
     const userDiscountAmount = totalFinal * (userDiscountPercent / 100);
-    const afterUser = totalFinal - userDiscountAmount;
 
     return (
         <div className="receipt-page">
             <div className="receipt">
                 <div className="receipt-header">
                     <h2>Заказ оформлен</h2>
-                    <p className="receipt-number">Заказ №{order.order_id}</p>
                     <p className="receipt-date">
                         {new Date(order.created_at || Date.now()).toLocaleString('ru-RU')}
                     </p>
@@ -289,7 +337,9 @@ function Receipt({ order, onBack }) {
                                     {it.quantity} × {p.toFixed(0)} ₽
                                     {d > 0 && <span className="receipt-item-disc"> (−{d}%)</span>}
                                 </div>
-                                <div className="receipt-item-sum">{(final * it.quantity).toFixed(0)} ₽</div>
+                                <div className="receipt-item-sum">
+                                    {(final * it.quantity).toFixed(0)} ₽
+                                </div>
                             </div>
                         );
                     })}
@@ -304,7 +354,7 @@ function Receipt({ order, onBack }) {
                     </div>
                     {serviceDiscount > 0 && (
                         <div className="receipt-row discount">
-                            <span>Скидки на услуги:</span>
+                            <span>Скидки на товары:</span>
                             <span>−{serviceDiscount.toFixed(0)} ₽</span>
                         </div>
                     )}
@@ -312,12 +362,6 @@ function Receipt({ order, onBack }) {
                         <div className="receipt-row discount">
                             <span>Персональная скидка ({userDiscountPercent}%):</span>
                             <span>−{userDiscountAmount.toFixed(0)} ₽</span>
-                        </div>
-                    )}
-                    {order.discount_amount > 0 && (
-                        <div className="receipt-row discount">
-                            <span>Купон {order.coupon_code}:</span>
-                            <span>−{parseFloat(order.discount_amount).toFixed(0)} ₽</span>
                         </div>
                     )}
                     <div className="receipt-row total">
@@ -333,9 +377,20 @@ function Receipt({ order, onBack }) {
                     <p>{order.address || '—'}</p>
                 </div>
 
+                <div className="receipt-address">
+                    <strong>Дата доставки:</strong>
+                    <p>
+                        {order.delivery_date
+                            ? new Date(order.delivery_date).toLocaleDateString('ru-RU')
+                            : '—'}
+                    </p>
+                </div>
+
                 <div className="receipt-actions">
                     <button className="btn-primary" onClick={onBack}>К моим заказам</button>
-                    <button className="btn-secondary" onClick={() => window.print()}>Распечатать</button>
+                    <button className="btn-secondary" onClick={() => window.print()}>
+                        Распечатать
+                    </button>
                 </div>
             </div>
         </div>

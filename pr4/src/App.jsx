@@ -55,7 +55,7 @@ export default function App() {
                     <main className="content">
                         <Routes>
                             <Route path="/" element={<ProtectedRoute><Catalog /></ProtectedRoute>} />
-                            <Route path="/service/:id" element={<ProtectedRoute><ServicePage /></ProtectedRoute>} />
+                            <Route path="/service/:slug" element={<ProtectedRoute><ServicePage /></ProtectedRoute>} />
 
                             {!hasAdminAccess && (
                                 <>
