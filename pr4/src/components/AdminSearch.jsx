@@ -8,6 +8,14 @@ const TYPES = [
     { value: 'certificate', label: 'Сертификаты' },
 ];
 
+// Какие поля показывать для каждого типа
+const FIELD_LABELS = {
+    user: { email: 'Email', first_name: 'Имя', last_name: 'Фамилия' },
+    service: { service_name: 'Название', price: 'Цена, ₽' },
+    coupon: { code: 'Код', discount_percent: 'Скидка, %' },
+    certificate: { code: 'Код', title: 'Название' },
+};
+
 export default function AdminSearch() {
     const [type, setType] = useState('user');
     const [q, setQ] = useState('');
@@ -40,6 +48,8 @@ export default function AdminSearch() {
         }
     }
 
+    const labels = FIELD_LABELS[type] || {};
+
     return (
         <section className="admin-section">
             <div className="admin-section-header">
@@ -48,9 +58,7 @@ export default function AdminSearch() {
 
             <div className="admin-search-bar">
                 <select value={type} onChange={(e) => setType(e.target.value)}>
-                    {TYPES.map(t => (
-                        <option key={t.value} value={t.value}>{t.label}</option>
-                    ))}
+                    {TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>
                 <input
                     type="text"
@@ -73,11 +81,11 @@ export default function AdminSearch() {
                 <div className="admin-search-results">
                     {results.map((item, idx) => (
                         <div key={idx} className="admin-search-result">
-                            {Object.entries(item).map(([k, v]) => (
-                                <div key={k} className="admin-search-field">
-                                    <span className="admin-search-key">{k}:</span>
+                            {Object.entries(labels).map(([key, label]) => (
+                                <div key={key} className="admin-search-field">
+                                    <span className="admin-search-key">{label}:</span>
                                     <span className="admin-search-value">
-                                        {String(v ?? '—')}
+                                        {String(item[key] ?? '—')}
                                     </span>
                                 </div>
                             ))}

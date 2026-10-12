@@ -15,8 +15,9 @@ export default function ServicePage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
-    // Отзывы
+    // Отзыв: создание/редактирование
     const [reviewForm, setReviewForm] = useState({ rating: 5, comment: '' });
+    const [editingReviewId, setEditingReviewId] = useState(null);
     const [submitting, setSubmitting] = useState(false);
     const [reviewError, setReviewError] = useState('');
     const [reviewSuccess, setReviewSuccess] = useState('');
@@ -47,7 +48,7 @@ export default function ServicePage() {
         }
     }
 
-    async function handleReviewSubmit(e) {
+    async function handleCreateReview(e) {
         e.preventDefault();
         setReviewError('');
         setReviewSuccess('');
@@ -62,6 +63,36 @@ export default function ServicePage() {
         } finally {
             setSubmitting(false);
         }
+    }
+
+    async function handleUpdateReview(e, reviewId) {
+        e.preventDefault();
+        setReviewError('');
+        setReviewSuccess('');
+        setSubmitting(true);
+        try {
+            await api.updateReview(reviewId, reviewForm.rating, reviewForm.comment);
+            setReviewSuccess('Отзыв обновлён');
+            setEditingReviewId(null);
+            setReviewForm({ rating: 5, comment: '' });
+            await loadService();
+        } catch (err) {
+            setReviewError(err.message);
+        } finally {
+            setSubmitting(false);
+        }
+    }
+
+    function startEditReview(r) {
+        setEditingReviewId(r.review_id);
+        setReviewForm({ rating: r.rating, comment: r.comment });
+        setReviewError('');
+        setReviewSuccess('');
+    }
+
+    function cancelEditReview() {
+        setEditingReviewId(null);
+        setReviewForm({ rating: 5, comment: '' });
     }
 
     if (loading) return <div className="state">Загрузка...</div>;
@@ -92,7 +123,9 @@ export default function ServicePage() {
         buttonText = 'Добавить в корзину';
     }
 
-    const alreadyReviewed = false; // сервер сам вернёт 400 при повторной попытке
+    const myReview = service.reviews?.find(r => r.is_mine && !r.deleted_by_admin);
+    const remaining = service.remaining_today;
+    const canReview = service.can_review === true;
 
     return (
         <div className="service-page">
@@ -128,6 +161,10 @@ export default function ServicePage() {
                                 <span className="meta-value discount">−{service.discount_percent}%</span>
                             </div>
                         )}
+                        <div className="meta-item">
+                            <span className="meta-label">Остаток на сегодня</span>
+                            <span className="meta-value">{remaining} шт.</span>
+                        </div>
                     </div>
 
                     <div className="service-page-price-block">
@@ -144,10 +181,10 @@ export default function ServicePage() {
                     <button
                         className="add-to-cart-btn large"
                         onClick={handleAdd}
-                        disabled={!canShop}
-                        title={!canShop ? 'Сотрудники и администраторы не могут добавлять товары' : ''}
+                        disabled={!canShop || remaining <= 0}
+                        title={remaining <= 0 ? 'Категория на сегодня закончилась' : ''}
                     >
-                        {buttonText}
+                        {remaining <= 0 ? 'Закончилось на сегодня' : buttonText}
                     </button>
                 </div>
             </div>
@@ -156,9 +193,9 @@ export default function ServicePage() {
             <section className="reviews-section">
                 <h2>Отзывы ({service.reviews?.length || 0})</h2>
 
-                {/* Форма отзыва — только для роли user */}
-                {canShop && (
-                    <form className="review-form" onSubmit={handleReviewSubmit}>
+                {/* Форма создания — только если покупал и нет своего отзыва */}
+                {canShop && canReview && !myReview && (
+                    <form className="review-form" onSubmit={handleCreateReview}>
                         <h3>Оставить отзыв</h3>
 
                         {reviewError && <div className="error">{reviewError}</div>}
@@ -168,9 +205,7 @@ export default function ServicePage() {
                             Оценка
                             <select
                                 value={reviewForm.rating}
-                                onChange={(e) =>
-                                    setReviewForm({ ...reviewForm, rating: Number(e.target.value) })
-                                }
+                                onChange={(e) => setReviewForm({ ...reviewForm, rating: Number(e.target.value) })}
                             >
                                 {[5, 4, 3, 2, 1].map(n => (
                                     <option key={n} value={n}>{n} ★</option>
@@ -179,13 +214,11 @@ export default function ServicePage() {
                         </label>
 
                         <label>
-                            Комментарий (необязательно)
+                            Комментарий
                             <textarea
                                 rows={3}
                                 value={reviewForm.comment}
-                                onChange={(e) =>
-                                    setReviewForm({ ...reviewForm, comment: e.target.value })
-                                }
+                                onChange={(e) => setReviewForm({ ...reviewForm, comment: e.target.value })}
                                 placeholder="Поделитесь впечатлением о товаре..."
                             />
                         </label>
@@ -196,28 +229,95 @@ export default function ServicePage() {
                     </form>
                 )}
 
-                {/* Список отзывов */}
+                {/* Пояснение — почему нельзя оставить отзыв */}
+                {canShop && !canReview && !myReview && (
+                    <div className="review-notice">
+                        Оставить отзыв можно только после покупки этого товара.
+                    </div>
+                )}
+
                 {service.reviews?.length === 0 && (
                     <p className="no-reviews">Пока отзывов нет — будьте первым!</p>
                 )}
 
                 <div className="reviews-list">
-                    {service.reviews?.map((r, idx) => (
-                        <div key={idx} className="review-card">
-                            <div className="review-header">
-                                <span className="review-author">
-                                    {r.first_name || 'Пользователь'} {r.last_name || ''}
-                                </span>
-                                <span className="review-date">
-                                    {new Date(r.created_at).toLocaleDateString('ru-RU')}
-                                </span>
+                    {service.reviews?.map(r => {
+                        const isEditing = editingReviewId === r.review_id;
+                        const isMine = r.is_mine && !r.deleted_by_admin;
+
+                        return (
+                            <div key={r.review_id} className="review-card">
+                                <div className="review-header">
+                                    <span className="review-author">
+                                        {r.first_name || 'Пользователь'} {r.last_name || ''}
+                                        {isMine && <span className="review-mine-badge">это вы</span>}
+                                    </span>
+                                    <span className="review-date">
+                                        {new Date(r.created_at).toLocaleDateString('ru-RU')}
+                                        {r.updated_at && ' · изменён'}
+                                    </span>
+                                </div>
+
+                                {r.deleted_by_admin ? (
+                                    <div className="review-deleted">
+                                        <strong>Отзыв удалён за нарушение политики</strong>
+                                        {r.deleted_reason && <p>{r.deleted_reason}</p>}
+                                    </div>
+                                ) : isEditing ? (
+                                    <form onSubmit={(e) => handleUpdateReview(e, r.review_id)} className="review-edit-form">
+                                        {reviewError && <div className="error">{reviewError}</div>}
+
+                                        <label>
+                                            Оценка
+                                            <select
+                                                value={reviewForm.rating}
+                                                onChange={(e) => setReviewForm({ ...reviewForm, rating: Number(e.target.value) })}
+                                            >
+                                                {[5, 4, 3, 2, 1].map(n => (
+                                                    <option key={n} value={n}>{n} ★</option>
+                                                ))}
+                                            </select>
+                                        </label>
+
+                                        <label>
+                                            Комментарий
+                                            <textarea
+                                                rows={3}
+                                                value={reviewForm.comment}
+                                                onChange={(e) => setReviewForm({ ...reviewForm, comment: e.target.value })}
+                                            />
+                                        </label>
+
+                                        <div className="review-edit-actions">
+                                            <button type="submit" disabled={submitting}>
+                                                {submitting ? 'Сохранение...' : 'Сохранить'}
+                                            </button>
+                                            <button type="button" onClick={cancelEditReview} className="btn-cancel">
+                                                Отмена
+                                            </button>
+                                        </div>
+                                    </form>
+                                ) : (
+                                    <>
+                                        <div className="review-rating">
+                                            {'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}
+                                        </div>
+                                        {r.comment && <p className="review-text">{r.comment}</p>}
+                                        {isMine && (
+                                            <div className="review-actions">
+                                                <button
+                                                    className="btn-edit"
+                                                    onClick={() => startEditReview(r)}
+                                                >
+                                                    Редактировать
+                                                </button>
+                                            </div>
+                                        )}
+                                    </>
+                                )}
                             </div>
-                            <div className="review-rating">
-                                {'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}
-                            </div>
-                            {r.comment && <p className="review-text">{r.comment}</p>}
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             </section>
         </div>

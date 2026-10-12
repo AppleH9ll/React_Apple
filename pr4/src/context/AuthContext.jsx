@@ -7,15 +7,21 @@ export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
 
-    // Восстановление сессии по токену из localStorage
+    // Восстанавливаем сессию по токену из localStorage
     useEffect(() => {
         const token = localStorage.getItem('shop_token');
-        if (!token) { setLoading(false); return; }
+        if (!token) {
+            setLoading(false);
+            return;
+        }
 
         setToken(token);
         api.me()
             .then(setUser)
-            .catch(() => { setToken(null); setUser(null); })
+            .catch(() => {
+                setToken(null);
+                setUser(null);
+            })
             .finally(() => setLoading(false));
     }, []);
 

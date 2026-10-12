@@ -4,12 +4,13 @@ import { useAuth } from '../context/AuthContext';
 import CategoryFilter from './CategoryFilter';
 import ServiceFilters from './ServiceFilters';
 import ServiceList from './ServiceList';
+import LiveSearch from './LiveSearch';
 
 export default function Catalog() {
     const { user } = useAuth();
     const [services, setServices] = useState([]);
     const [categories, setCategories] = useState([]);
-    const [selectedCategories, setSelectedCategories] = useState([]); // массив slug
+    const [selectedCategories, setSelectedCategories] = useState([]);
     const [filters, setFilters] = useState({
         q: '',
         min_price: '',
@@ -23,8 +24,6 @@ export default function Catalog() {
         try {
             setLoading(true);
             setError('');
-
-            // Если выбрана одна категория — фильтруем на бэке по slug
             const query = { ...filters };
             if (selectedCategories.length === 1) {
                 query.category = selectedCategories[0];
@@ -35,12 +34,9 @@ export default function Catalog() {
                 api.categories(),
             ]);
 
-            // Если выбрано несколько категорий — фильтруем локально по slug
             if (selectedCategories.length > 1) {
                 setServices(
-                    servicesData.filter(s =>
-                        selectedCategories.includes(s.category_slug)
-                    )
+                    servicesData.filter(s => selectedCategories.includes(s.category_slug))
                 );
             } else {
                 setServices(servicesData);
@@ -70,6 +66,11 @@ export default function Catalog() {
                         Ваша скидка: <b>{user.discount_percent}%</b>
                     </div>
                 )}
+            </div>
+
+            {/* Живой поиск */}
+            <div style={{ marginBottom: '20px' }}>
+                <LiveSearch />
             </div>
 
             <div className="catalog">

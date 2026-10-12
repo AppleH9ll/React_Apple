@@ -6,6 +6,7 @@ import morgan from 'morgan';
 import pg from 'pg';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import nodemailer from 'nodemailer';
 
 dotenv.config();
 
@@ -31,25 +32,45 @@ pool.on('connect', () => console.log('Подключение к PostgreSQL ус�
 pool.on('error', (err) => console.error('Ошибка PostgreSQL:', err));
 
 // =========================================================
-// MIDDLEWARE — единая система защиты
+// ПОЧТА
 // =========================================================
-// protect(roles) — фабрика middleware.
-//   roles = null              → любой авторизованный пользователь
-//   roles = ['admin']         → только админ
-//   roles = ['admin','employee'] → админ или сотрудник
-//
-// Примеры использования в роутах:
-//   app.get('/api/roles', adminOnly(), handler)
-//   app.get('/api/appointments', staffOnly(), handler)
-//   app.get('/api/cart', auth(), handler)
+const mailer = nodemailer.createTransport({
+    host: process.env.MAIL_HOST || 'smtp.gmail.com',
+    port: Number(process.env.MAIL_PORT) || 587,
+    secure: false,
+    auth: {
+        user: process.env.MAIL_USER,
+        pass: process.env.MAIL_PASS,
+    },
+});
+
+async function sendResetCode(email, code) {
+    if (!process.env.MAIL_USER || !process.env.MAIL_PASS) {
+        console.log(`⚠️  MAIL не настроен. Код сброса для ${email}: ${code}`);
+        return;
+    }
+    await mailer.sendMail({
+        from: process.env.MAIL_FROM || 'noreply@watershop.local',
+        to: email,
+        subject: 'WaterShop — сброс пароля',
+        html: `
+            <h2>Сброс пароля</h2>
+            <p>Ваш код подтверждения:</p>
+            <h1 style="letter-spacing: 4px;">${code}</h1>
+            <p>Код действителен 15 минут. Если вы не запрашивали сброс — проигнорируйте это письмо.</p>
+        `,
+    });
+}
+
+// =========================================================
+// MIDDLEWARE
+// =========================================================
 function protect(roles = null) {
     return (req, res, next) => {
         const header = req.headers.authorization || '';
         const token = header.startsWith('Bearer ') ? header.slice(7) : null;
 
-        if (!token) {
-            return res.status(401).json({ error: 'Требуется авторизация' });
-        }
+        if (!token) return res.status(401).json({ error: 'Требуется авторизация' });
         try {
             req.user = jwt.verify(token, JWT_SECRET);
         } catch {
@@ -62,19 +83,19 @@ function protect(roles = null) {
     };
 }
 
-// Готовые шорткаты для роутов
+function optionalAuth() {
+    return (req, _res, next) => {
+        const header = req.headers.authorization || '';
+        const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+        if (!token) return next();
+        try { req.user = jwt.verify(token, JWT_SECRET); } catch { /* ignore */ }
+        next();
+    };
+}
+
 const auth      = () => protect(null);
 const adminOnly = () => protect(['admin']);
 const staffOnly = () => protect(['admin', 'employee']);
-
-// Хелпер: получить информацию о роли по id
-async function getRoleById(roleId, client = pool) {
-    const r = await client.query(
-        'SELECT role_id, role_name FROM roles WHERE role_id = $1',
-        [roleId]
-    );
-    return r.rows[0] || null;
-}
 
 function signToken(user) {
     return jwt.sign(
@@ -85,7 +106,35 @@ function signToken(user) {
 }
 
 // =========================================================
-// АВТОРИЗАЦИЯ (публичные роуты)
+// ВАЛИДАТОРЫ
+// =========================================================
+const BAD_WORDS = [
+    'хуй', 'пизд', 'ебан', 'ебат', 'бляд', 'сука', 'мудак', 'гандон',
+    'долбоеб', 'залуп', 'пидор', 'fuck', 'shit', 'bitch', 'cunt',
+];
+
+function containsBadWords(text) {
+    if (!text) return false;
+    const lower = text.toLowerCase();
+    return BAD_WORDS.some(w => lower.includes(w));
+}
+
+function isValidFullName(name) {
+    if (!name || name.trim().length < 2) return false;
+    if (!/^[А-Яа-яЁёA-Za-z\s-]+$/.test(name.trim())) return false;
+    const parts = name.trim().split(/\s+/);
+    return parts.length >= 2;
+}
+
+function normalizePhone(phone) {
+    if (!phone) return null;
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length !== 11) return null;
+    return `+${digits[0]} (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7, 9)}-${digits.slice(9)}`;
+}
+
+// =========================================================
+// АВТОРИЗАЦИЯ
 // =========================================================
 app.post('/api/auth/register', async (req, res) => {
     try {
@@ -94,33 +143,36 @@ app.post('/api/auth/register', async (req, res) => {
         if (!full_name || !email || !password) {
             return res.status(400).json({ error: 'Заполните обязательные поля' });
         }
-        if (password.length < 6) {
-            return res.status(400).json({ error: 'Пароль минимум 6 символов' });
+        if (!isValidFullName(full_name)) {
+            return res.status(400).json({ error: 'Укажите настоящее ФИО (только буквы, минимум имя и фамилия)' });
         }
+        if (password.length < 6) return res.status(400).json({ error: 'Пароль минимум 6 символов' });
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
             return res.status(400).json({ error: 'Некорректный email' });
+        }
+
+        const phoneNormalized = normalizePhone(phone);
+        if (phone && !phoneNormalized) {
+            return res.status(400).json({ error: 'Телефон должен быть в формате +7 (999) 123-45-67' });
         }
 
         const dup = await pool.query('SELECT 1 FROM users WHERE email = $1', [email]);
         if (dup.rows.length) return res.status(400).json({ error: 'Email уже занят' });
 
         const roleRes = await pool.query(
-            "SELECT role_id, role_name FROM roles WHERE role_name = 'user' LIMIT 1"
+            "SELECT role_id FROM roles WHERE role_name = 'user' LIMIT 1"
         );
-        if (!roleRes.rows.length) {
-            return res.status(500).json({ error: 'Роль "user" не найдена в БД' });
-        }
 
         const parts = full_name.trim().split(' ');
-        const firstName = parts[0] || '';
-        const lastName = parts.slice(1).join(' ') || '';
+        const firstName = parts[0];
+        const lastName = parts.slice(1).join(' ');
 
         const hash = await bcrypt.hash(password, 10);
         const r = await pool.query(
             `INSERT INTO users (email, password_hash, first_name, last_name, phone, role_id)
              VALUES ($1,$2,$3,$4,$5,$6)
              RETURNING user_id, email, first_name, last_name, phone, role_id, discount_percent`,
-            [email, hash, firstName, lastName, phone || null, roleRes.rows[0].role_id]
+            [email, hash, firstName, lastName, phoneNormalized, roleRes.rows[0].role_id]
         );
 
         const user = { ...r.rows[0], role_name: 'user' };
@@ -137,9 +189,7 @@ app.post('/api/auth/register', async (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-        if (!email || !password) {
-            return res.status(400).json({ error: 'Email и пароль обязательны' });
-        }
+        if (!email || !password) return res.status(400).json({ error: 'Email и пароль обязательны' });
 
         const r = await pool.query(
             `SELECT u.*, r.role_name FROM users u
@@ -155,15 +205,12 @@ app.post('/api/auth/login', async (req, res) => {
 
         const token = signToken(user);
         const { user_id, role_id, password_hash, ...safeUser } = user;
-
         res.json({ user: safeUser, token });
     } catch (e) {
-        console.error(e);
         res.status(500).json({ error: e.message });
     }
 });
 
-// Текущий пользователь — по токену
 app.get('/api/auth/me', auth(), async (req, res) => {
     try {
         const r = await pool.query(
@@ -175,7 +222,73 @@ app.get('/api/auth/me', auth(), async (req, res) => {
         );
         if (!r.rows.length) return res.status(404).json({ error: 'Пользователь не найден' });
         res.json(r.rows[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// =========================================================
+// СБРОС ПАРОЛЯ
+// =========================================================
+app.post('/api/auth/forgot-password', async (req, res) => {
+    try {
+        const { email } = req.body;
+        if (!email) return res.status(400).json({ error: 'Email обязателен' });
+
+        const r = await pool.query('SELECT user_id FROM users WHERE email = $1', [email]);
+        if (!r.rows.length) {
+            return res.json({ message: 'Если такой email есть — код отправлен' });
+        }
+
+        const userId = r.rows[0].user_id;
+
+        await pool.query('UPDATE password_resets SET used = TRUE WHERE user_id = $1', [userId]);
+
+        const code = String(Math.floor(100000 + Math.random() * 900000));
+
+        await pool.query(
+            `INSERT INTO password_resets (user_id, code, expires_at)
+             VALUES ($1, $2, NOW() + INTERVAL '15 minutes')`,
+            [userId, code]
+        );
+
+        await sendResetCode(email, code);
+
+        res.json({ message: 'Если такой email есть — код отправлен' });
     } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+    try {
+        const { email, code, new_password } = req.body;
+        if (!email || !code || !new_password) {
+            return res.status(400).json({ error: 'Заполните все поля' });
+        }
+        if (new_password.length < 6) return res.status(400).json({ error: 'Пароль минимум 6 символов' });
+
+        const r = await pool.query(
+            `SELECT pr.reset_id, pr.user_id
+             FROM password_resets pr
+             JOIN users u ON pr.user_id = u.user_id
+             WHERE u.email = $1 AND pr.code = $2
+               AND pr.used = FALSE AND pr.expires_at > NOW()
+             ORDER BY pr.reset_id DESC LIMIT 1`,
+            [email, code]
+        );
+        if (!r.rows.length) {
+            return res.status(400).json({ error: 'Неверный или истёкший код' });
+        }
+
+        const { reset_id, user_id } = r.rows[0];
+        const hash = await bcrypt.hash(new_password, 10);
+
+        await pool.query('UPDATE users SET password_hash = $1 WHERE user_id = $2', [hash, user_id]);
+        await pool.query('UPDATE password_resets SET used = TRUE WHERE reset_id = $1', [reset_id]);
+
+        res.json({ message: 'Пароль успешно изменён' });
+    } catch (e) {
+        console.error(e);
         res.status(500).json({ error: e.message });
     }
 });
@@ -186,7 +299,11 @@ app.get('/api/auth/me', auth(), async (req, res) => {
 app.get('/api/categories', async (_req, res) => {
     try {
         const r = await pool.query(
-            'SELECT slug, category_name, description FROM categories ORDER BY category_id'
+            `SELECT c.slug, c.category_name, c.description,
+                    COALESCE(cdl.daily_limit, 10) AS daily_limit
+             FROM categories c
+             LEFT JOIN category_daily_limits cdl ON c.category_id = cdl.category_id
+             ORDER BY c.category_id`
         );
         res.json(r.rows);
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -194,12 +311,11 @@ app.get('/api/categories', async (_req, res) => {
 
 app.post('/api/categories', staffOnly(), async (req, res) => {
     try {
-        const { category_name, description } = req.body;
+        const { category_name, description, daily_limit } = req.body;
         if (!category_name || !category_name.trim()) {
             return res.status(400).json({ error: 'Название обязательно' });
         }
-        const slug = category_name.trim().toLowerCase()
-            .replace(/[^a-zA-Zа-яА-Я0-9]+/g, '-');
+        const slug = category_name.trim().toLowerCase().replace(/[^a-zA-Zа-яА-Я0-9]+/g, '-');
 
         const dup = await pool.query(
             'SELECT 1 FROM categories WHERE LOWER(category_name) = LOWER($1)',
@@ -207,12 +323,28 @@ app.post('/api/categories', staffOnly(), async (req, res) => {
         );
         if (dup.rows.length) return res.status(400).json({ error: 'Такая категория уже есть' });
 
-        const r = await pool.query(
-            `INSERT INTO categories (category_name, description, slug)
-             VALUES ($1, $2, $3) RETURNING slug, category_name, description`,
-            [category_name.trim(), description || null, slug]
-        );
-        res.status(201).json(r.rows[0]);
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            const r = await client.query(
+                `INSERT INTO categories (category_name, description, slug)
+                 VALUES ($1, $2, $3)
+                 RETURNING category_id, slug, category_name, description`,
+                [category_name.trim(), description || null, slug]
+            );
+            await client.query(
+                `INSERT INTO category_daily_limits (category_id, daily_limit) VALUES ($1, $2)
+                 ON CONFLICT (category_id) DO UPDATE SET daily_limit = $2`,
+                [r.rows[0].category_id, daily_limit || 10]
+            );
+            await client.query('COMMIT');
+            res.status(201).json({ ...r.rows[0], daily_limit: daily_limit || 10 });
+        } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        } finally {
+            client.release();
+        }
     } catch (e) {
         if (e.code === '23505') return res.status(400).json({ error: 'Уже существует' });
         res.status(500).json({ error: e.message });
@@ -221,57 +353,53 @@ app.post('/api/categories', staffOnly(), async (req, res) => {
 
 app.put('/api/categories/:slug', staffOnly(), async (req, res) => {
     try {
-        const { category_name, description } = req.body;
-        const dup = await pool.query(
-            'SELECT 1 FROM categories WHERE LOWER(category_name) = LOWER($1) AND slug <> $2',
-            [category_name, req.params.slug]
-        );
-        if (dup.rows.length) return res.status(400).json({ error: 'Название занято' });
-
-        const newSlug = category_name.trim().toLowerCase()
-            .replace(/[^a-zA-Zа-яА-Я0-9]+/g, '-');
+        const { category_name, description, daily_limit } = req.body;
+        const newSlug = category_name.trim().toLowerCase().replace(/[^a-zA-Zа-яА-Я0-9]+/g, '-');
 
         const r = await pool.query(
             `UPDATE categories SET category_name = $1, description = $2, slug = $3
-             WHERE slug = $4 RETURNING slug, category_name, description`,
+             WHERE slug = $4
+             RETURNING category_id, slug, category_name, description`,
             [category_name, description || null, newSlug, req.params.slug]
         );
         if (!r.rows.length) return res.status(404).json({ error: 'Не найдено' });
-        res.json(r.rows[0]);
+
+        if (daily_limit) {
+            await pool.query(
+                `INSERT INTO category_daily_limits (category_id, daily_limit)
+                 VALUES ($1, $2)
+                 ON CONFLICT (category_id) DO UPDATE SET daily_limit = $2`,
+                [r.rows[0].category_id, daily_limit]
+            );
+        }
+        res.json({ ...r.rows[0], daily_limit: daily_limit || 10 });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// КАСКАДНОЕ УДАЛЕНИЕ КАТЕГОРИИ
 app.delete('/api/categories/:slug', staffOnly(), async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
-        const cnt = await client.query(
-            `SELECT COUNT(*)::int AS count FROM services s
-             JOIN categories c ON s.category_id = c.category_id
-             WHERE c.slug = $1`,
-            [req.params.slug]
-        );
-        const serviceCount = cnt.rows[0].count;
-
-        if (serviceCount > 0 && req.query.cascade !== 'true') {
+        if (req.params.slug === 'no-category') {
             await client.query('ROLLBACK');
-            return res.status(409).json({
-                error: `В категории ${serviceCount} товаров. Требуется каскадное удаление.`,
-                serviceCount,
-                requiresCascade: true,
-            });
+            return res.status(400).json({ error: 'Категорию "Без категории" удалять нельзя' });
         }
 
-        if (serviceCount > 0) {
-            await client.query(
-                `DELETE FROM services WHERE category_id = (
-                    SELECT category_id FROM categories WHERE slug = $1
-                )`,
-                [req.params.slug]
-            );
+        const noCat = await client.query(
+            "SELECT category_id FROM categories WHERE slug = 'no-category'"
+        );
+        if (!noCat.rows.length) {
+            await client.query('ROLLBACK');
+            return res.status(500).json({ error: 'Не найдена служебная категория "Без категории"' });
         }
+        const fallbackId = noCat.rows[0].category_id;
+
+        const move = await client.query(
+            `UPDATE services SET category_id = $1
+             WHERE category_id = (SELECT category_id FROM categories WHERE slug = $2)`,
+            [fallbackId, req.params.slug]
+        );
 
         const r = await client.query(
             'DELETE FROM categories WHERE slug = $1 RETURNING category_name',
@@ -284,8 +412,8 @@ app.delete('/api/categories/:slug', staffOnly(), async (req, res) => {
 
         await client.query('COMMIT');
         res.json({
-            message: `Категория "${r.rows[0].category_name}" удалена. Удалено товаров: ${serviceCount}`,
-            deletedServices: serviceCount,
+            message: `Категория "${r.rows[0].category_name}" удалена. Товаров перенесено в "Без категории": ${move.rowCount}`,
+            movedServices: move.rowCount,
         });
     } catch (e) {
         await client.query('ROLLBACK');
@@ -296,7 +424,7 @@ app.delete('/api/categories/:slug', staffOnly(), async (req, res) => {
 });
 
 // =========================================================
-// ТОВАРЫ (публичные GET, защищённые POST/PUT/DELETE)
+// ТОВАРЫ
 // =========================================================
 app.get('/api/services', async (req, res) => {
     try {
@@ -330,21 +458,36 @@ app.get('/api/services', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/services/:slug', async (req, res) => {
+app.get('/api/services/:slug', optionalAuth(), async (req, res) => {
     try {
         const srv = await pool.query(
             `SELECT s.slug, s.service_name, s.description, s.duration_minutes,
                     s.price, s.image_url, s.discount_percent,
-                    c.slug AS category_slug, c.category_name
+                    c.slug AS category_slug, c.category_name,
+                    COALESCE(cdl.daily_limit, 10) AS daily_limit,
+                    COALESCE((
+                        SELECT SUM(oi.quantity)::int
+                        FROM order_items oi
+                        JOIN orders o ON oi.order_id = o.order_id
+                        JOIN services ss ON oi.service_id = ss.service_id
+                        WHERE ss.category_id = c.category_id
+                          AND o.created_at::date = CURRENT_DATE
+                          AND o.status <> 'cancelled'
+                    ), 0) AS sold_today
              FROM services s
              LEFT JOIN categories c ON s.category_id = c.category_id
+             LEFT JOIN category_daily_limits cdl ON c.category_id = cdl.category_id
              WHERE s.slug = $1`,
             [req.params.slug]
         );
         if (!srv.rows.length) return res.status(404).json({ error: 'Товар не найден' });
 
+        const userId = req.user?.userId;
+
         const rv = await pool.query(
-            `SELECT r.rating, r.comment, r.created_at,
+            `SELECT r.review_id, r.user_id, r.rating, r.comment,
+                    r.created_at, r.updated_at,
+                    r.deleted_by_admin, r.deleted_reason,
                     u.first_name, u.last_name
              FROM reviews r
              JOIN users u ON r.user_id = u.user_id
@@ -353,7 +496,42 @@ app.get('/api/services/:slug', async (req, res) => {
             [req.params.slug]
         );
 
-        res.json({ ...srv.rows[0], reviews: rv.rows });
+        const reviews = rv.rows.map(r => ({
+            review_id: r.review_id,
+            rating: r.rating,
+            comment: r.comment,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+            deleted_by_admin: r.deleted_by_admin,
+            deleted_reason: r.deleted_reason,
+            first_name: r.first_name,
+            last_name: r.last_name,
+            is_mine: userId ? r.user_id === userId : false,
+        }));
+
+        let can_review = false;
+        if (userId) {
+            const purchase = await pool.query(
+                `SELECT 1 FROM order_items oi
+                 JOIN orders o ON oi.order_id = o.order_id
+                 WHERE o.user_id = $1
+                   AND oi.service_id = (SELECT service_id FROM services WHERE slug = $2)
+                   AND o.status <> 'cancelled'
+                 LIMIT 1`,
+                [userId, req.params.slug]
+            );
+            can_review = purchase.rows.length > 0;
+        }
+
+        const row = srv.rows[0];
+        const remaining = row.daily_limit - row.sold_today;
+
+        res.json({
+            ...row,
+            remaining_today: Math.max(0, remaining),
+            can_review,
+            reviews,
+        });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -365,15 +543,14 @@ app.post('/api/services', staffOnly(), async (req, res) => {
         if (!service_name || !price) {
             return res.status(400).json({ error: 'Название и цена обязательны' });
         }
+        if (Number(price) <= 0) {
+            return res.status(400).json({ error: 'Цена должна быть больше нуля' });
+        }
 
-        const cat = await pool.query(
-            'SELECT category_id FROM categories WHERE slug = $1',
-            [category_slug]
-        );
+        const cat = await pool.query('SELECT category_id FROM categories WHERE slug = $1', [category_slug]);
         if (!cat.rows.length) return res.status(400).json({ error: 'Категория не найдена' });
 
-        const slug = service_name.trim().toLowerCase()
-            .replace(/[^a-zA-Zа-яА-Я0-9]+/g, '-');
+        const slug = service_name.trim().toLowerCase().replace(/[^a-zA-Zа-яА-Я0-9]+/g, '-');
 
         const r = await pool.query(
             `INSERT INTO services (service_name, description, duration_minutes, price,
@@ -396,14 +573,14 @@ app.put('/api/services/:slug', staffOnly(), async (req, res) => {
         const { service_name, description, duration_minutes, price,
                 category_slug, image_url, discount_percent } = req.body;
 
-        const cat = await pool.query(
-            'SELECT category_id FROM categories WHERE slug = $1',
-            [category_slug]
-        );
+        if (Number(price) <= 0) {
+            return res.status(400).json({ error: 'Цена должна быть больше нуля' });
+        }
+
+        const cat = await pool.query('SELECT category_id FROM categories WHERE slug = $1', [category_slug]);
         if (!cat.rows.length) return res.status(400).json({ error: 'Категория не найдена' });
 
-        const newSlug = service_name.trim().toLowerCase()
-            .replace(/[^a-zA-Zа-яА-Я0-9]+/g, '-');
+        const newSlug = service_name.trim().toLowerCase().replace(/[^a-zA-Zа-яА-Я0-9]+/g, '-');
 
         const r = await pool.query(
             `UPDATE services SET service_name = $1, description = $2, duration_minutes = $3,
@@ -433,7 +610,47 @@ app.delete('/api/services/:slug', staffOnly(), async (req, res) => {
 });
 
 // =========================================================
-// КОРЗИНА — только роль user
+// ДНЕВНОЙ ЛИМИТ МАГАЗИНА
+// =========================================================
+async function checkShopDailyLimit(client, serviceSlug, quantity) {
+    const res = await client.query(
+        `SELECT c.category_id, c.slug AS category_slug,
+                COALESCE(cdl.daily_limit, 10) AS daily_limit
+         FROM services s
+         JOIN categories c ON s.category_id = c.category_id
+         LEFT JOIN category_daily_limits cdl ON c.category_id = cdl.category_id
+         WHERE s.slug = $1`,
+        [serviceSlug]
+    );
+    if (!res.rows.length) return { ok: false, error: 'Товар не найден' };
+
+    const { category_id, category_slug, daily_limit } = res.rows[0];
+
+    const sold = await client.query(
+        `SELECT COALESCE(SUM(oi.quantity), 0)::int AS total
+         FROM order_items oi
+         JOIN orders o ON oi.order_id = o.order_id
+         JOIN services s ON oi.service_id = s.service_id
+         WHERE s.category_id = $1
+           AND o.created_at::date = CURRENT_DATE
+           AND o.status <> 'cancelled'`,
+        [category_id]
+    );
+
+    const soldToday = sold.rows[0].total;
+    const remaining = daily_limit - soldToday;
+
+    if (quantity > remaining) {
+        return {
+            ok: false,
+            error: `Категория "${category_slug}" на сегодня закончилась. Осталось: ${remaining} шт. Уже продано сегодня: ${soldToday}.`,
+        };
+    }
+    return { ok: true, remaining: remaining - quantity };
+}
+
+// =========================================================
+// КОРЗИНА
 // =========================================================
 app.get('/api/cart', auth(), async (req, res) => {
     try {
@@ -452,29 +669,42 @@ app.get('/api/cart', auth(), async (req, res) => {
 });
 
 app.post('/api/cart', auth(), async (req, res) => {
+    const client = await pool.connect();
     try {
+        await client.query('BEGIN');
         const { service_slug, quantity = 1 } = req.body;
-        if (!service_slug) return res.status(400).json({ error: 'service_slug обязателен' });
+        if (!service_slug) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'service_slug обязателен' });
+        }
 
-        const roleRes = await pool.query(
+        const roleRes = await client.query(
             `SELECT r.role_name FROM users u
              JOIN roles r ON u.role_id = r.role_id
              WHERE u.user_id = $1`,
             [req.user.userId]
         );
         if (roleRes.rows[0]?.role_name !== 'user') {
-            return res.status(403).json({
-                error: 'Сотрудники и администраторы не могут добавлять товары в корзину'
-            });
+            await client.query('ROLLBACK');
+            return res.status(403).json({ error: 'Сотрудники и администраторы не могут добавлять товары в корзину' });
         }
 
-        const srv = await pool.query(
+        const srv = await client.query(
             'SELECT service_id FROM services WHERE slug = $1',
             [service_slug]
         );
-        if (!srv.rows.length) return res.status(404).json({ error: 'Товар не найден' });
+        if (!srv.rows.length) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Товар не найден' });
+        }
 
-        const r = await pool.query(
+        const limit = await checkShopDailyLimit(client, service_slug, quantity);
+        if (!limit.ok) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: limit.error });
+        }
+
+        const r = await client.query(
             `INSERT INTO cart (user_id, service_id, quantity)
              VALUES ($1, $2, $3)
              ON CONFLICT (user_id, service_id)
@@ -482,8 +712,14 @@ app.post('/api/cart', auth(), async (req, res) => {
              RETURNING quantity`,
             [req.user.userId, srv.rows[0].service_id, quantity]
         );
+        await client.query('COMMIT');
         res.status(201).json({ message: 'Добавлено в корзину', quantity: r.rows[0].quantity });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) {
+        await client.query('ROLLBACK');
+        res.status(500).json({ error: e.message });
+    } finally {
+        client.release();
+    }
 });
 
 app.patch('/api/cart/:slug', auth(), async (req, res) => {
@@ -530,7 +766,7 @@ app.delete('/api/cart', auth(), async (req, res) => {
 });
 
 // =========================================================
-// ЗАКАЗЫ — с датой доставки, без user_id на входе
+// ЗАКАЗЫ
 // =========================================================
 app.post('/api/orders', auth(), async (req, res) => {
     const client = await pool.connect();
@@ -558,10 +794,6 @@ app.post('/api/orders', auth(), async (req, res) => {
             'SELECT discount_percent FROM users WHERE user_id = $1',
             [req.user.userId]
         );
-        if (!userRes.rows.length) {
-            await client.query('ROLLBACK');
-            return res.status(404).json({ error: 'Пользователь не найден' });
-        }
         const userDiscount = Number(userRes.rows[0].discount_percent) || 0;
 
         const cartRes = await client.query(
@@ -573,6 +805,45 @@ app.post('/api/orders', auth(), async (req, res) => {
         if (!cartRes.rows.length) {
             await client.query('ROLLBACK');
             return res.status(400).json({ error: 'Корзина пуста' });
+        }
+
+        const byCategory = {};
+        for (const it of cartRes.rows) {
+            const srv = await client.query(
+                `SELECT c.category_id, c.slug AS category_slug,
+                        COALESCE(cdl.daily_limit, 10) AS daily_limit
+                 FROM services s
+                 JOIN categories c ON s.category_id = c.category_id
+                 LEFT JOIN category_daily_limits cdl ON c.category_id = cdl.category_id
+                 WHERE s.service_id = $1`,
+                [it.service_id]
+            );
+            const { category_id, category_slug, daily_limit } = srv.rows[0];
+            if (!byCategory[category_id]) {
+                byCategory[category_id] = { slug: category_slug, limit: daily_limit, qty: 0 };
+            }
+            byCategory[category_id].qty += it.quantity;
+        }
+
+        for (const [catId, data] of Object.entries(byCategory)) {
+            const sold = await client.query(
+                `SELECT COALESCE(SUM(oi.quantity), 0)::int AS total
+                 FROM order_items oi
+                 JOIN orders o ON oi.order_id = o.order_id
+                 JOIN services s ON oi.service_id = s.service_id
+                 WHERE s.category_id = $1
+                   AND o.created_at::date = CURRENT_DATE
+                   AND o.status <> 'cancelled'`,
+                [catId]
+            );
+            const soldToday = sold.rows[0].total;
+            const remaining = data.limit - soldToday;
+            if (data.qty > remaining) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({
+                    error: `Категория "${data.slug}" на сегодня закончилась. Осталось: ${remaining} шт.`,
+                });
+            }
         }
 
         let subtotal = 0, afterService = 0;
@@ -596,6 +867,16 @@ app.post('/api/orders', auth(), async (req, res) => {
                 await client.query('ROLLBACK');
                 return res.status(400).json({ error: 'Купон недействителен' });
             }
+            if (cp.rows[0].first_order_only) {
+                const orders = await client.query(
+                    'SELECT COUNT(*)::int AS c FROM orders WHERE user_id = $1',
+                    [req.user.userId]
+                );
+                if (orders.rows[0].c > 0) {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({ error: 'Этот купон доступен только на первый заказ' });
+                }
+            }
             couponDiscount = cp.rows[0].discount_percent;
             couponId = cp.rows[0].coupon_id;
         }
@@ -603,22 +884,29 @@ app.post('/api/orders', auth(), async (req, res) => {
         const couponAmount = afterUser * (couponDiscount / 100);
         const finalAmount = afterUser - couponAmount;
 
+        // Вычисляем локальный номер заказа для этого пользователя
+        const numRes = await client.query(
+            `SELECT COALESCE(MAX(user_order_number), 0) + 1 AS next_num
+             FROM orders WHERE user_id = $1`,
+            [req.user.userId]
+        );
+        const userOrderNumber = numRes.rows[0].next_num;
+
         const orderRes = await client.query(
             `INSERT INTO orders (user_id, total_amount, discount_amount, final_amount,
-                                 coupon_code, address, delivery_date)
-             VALUES ($1,$2,$3,$4,$5,$6,$7)
-             RETURNING order_id, total_amount, discount_amount, final_amount,
-                       coupon_code, address, delivery_date, created_at`,
+                                 coupon_code, address, delivery_date, status, user_order_number)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8)
+             RETURNING order_id, user_order_number, total_amount, discount_amount,
+                       final_amount, coupon_code, address, delivery_date, status, created_at`,
             [req.user.userId, subtotal, subtotal - finalAmount, finalAmount,
-             coupon_code || null, address.trim(), delivery_date]
+             coupon_code || null, address.trim(), delivery_date, userOrderNumber]
         );
 
         for (const it of cartRes.rows) {
             await client.query(
                 `INSERT INTO order_items (order_id, service_id, service_name, quantity, price)
                  VALUES ($1,$2,$3,$4,$5)`,
-                [orderRes.rows[0].order_id, it.service_id, it.service_name,
-                 it.quantity, it.price]
+                [orderRes.rows[0].order_id, it.service_id, it.service_name, it.quantity, it.price]
             );
         }
 
@@ -632,8 +920,10 @@ app.post('/api/orders', auth(), async (req, res) => {
         await client.query('DELETE FROM cart WHERE user_id = $1', [req.user.userId]);
         await client.query('COMMIT');
 
-        const { order_id, ...safeOrder } = orderRes.rows[0];
-        res.status(201).json({ ...safeOrder, items: cartRes.rows });
+        res.status(201).json({
+            ...orderRes.rows[0],
+            items: cartRes.rows,
+        });
     } catch (e) {
         await client.query('ROLLBACK');
         res.status(500).json({ error: e.message });
@@ -645,9 +935,11 @@ app.post('/api/orders', auth(), async (req, res) => {
 app.get('/api/orders', auth(), async (req, res) => {
     try {
         const orders = await pool.query(
-            `SELECT o.order_id, o.total_amount, o.discount_amount, o.final_amount,
+            `SELECT o.order_id, o.user_order_number, o.total_amount,
+                    o.discount_amount, o.final_amount,
                     o.coupon_code, o.address, o.delivery_date, o.status, o.created_at
-             FROM orders o WHERE o.user_id = $1 ORDER BY o.created_at DESC`,
+             FROM orders o WHERE o.user_id = $1
+             ORDER BY o.created_at DESC`,
             [req.user.userId]
         );
 
@@ -658,10 +950,114 @@ app.get('/api/orders', auth(), async (req, res) => {
                  FROM order_items WHERE order_id = $1`,
                 [o.order_id]
             );
-            result.push({ ...o, items: items.rows });
+            result.push({
+                ...o,
+                items: items.rows,
+            });
         }
         res.json(result);
     } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// =========================================================
+// ОПЛАТА ЗАКАЗА
+// =========================================================
+app.post('/api/orders/:id/pay', auth(), async (req, res) => {
+    try {
+        const { card_number, card_holder, expiry, cvv } = req.body;
+
+        const digits = (card_number || '').replace(/\s/g, '');
+        if (!/^\d{16}$/.test(digits)) {
+            return res.status(400).json({ error: 'Номер карты — 16 цифр' });
+        }
+        if (!card_holder || card_holder.trim().length < 3) {
+            return res.status(400).json({ error: 'Укажите имя держателя карты' });
+        }
+        if (!/^\d{2}\/\d{2}$/.test(expiry || '')) {
+            return res.status(400).json({ error: 'Срок действия в формате ММ/ГГ' });
+        }
+
+        const [mm, yy] = expiry.split('/').map(s => parseInt(s, 10));
+        if (mm < 1 || mm > 12) {
+            return res.status(400).json({ error: 'Неверный месяц' });
+        }
+        const now = new Date();
+        const expDate = new Date(2000 + yy, mm, 0);
+        if (expDate < now) {
+            return res.status(400).json({ error: 'Срок действия карты истёк' });
+        }
+
+        if (!/^\d{3}$/.test(cvv || '')) {
+            return res.status(400).json({ error: 'CVV — 3 цифры' });
+        }
+
+        const check = await pool.query(
+            `SELECT order_id, status, user_id FROM orders WHERE order_id = $1`,
+            [req.params.id]
+        );
+        if (!check.rows.length) return res.status(404).json({ error: 'Заказ не найден' });
+
+        const order = check.rows[0];
+        if (order.user_id !== req.user.userId) {
+            return res.status(403).json({ error: 'Это не ваш заказ' });
+        }
+        if (order.status !== 'pending') {
+            return res.status(400).json({ error: `Заказ нельзя оплатить (текущий статус: ${order.status})` });
+        }
+
+        const r = await pool.query(
+            `UPDATE orders SET status = 'paid', paid_at = NOW()
+             WHERE order_id = $1
+             RETURNING order_id, user_order_number, status, paid_at`,
+            [req.params.id]
+        );
+
+        res.json({
+            message: 'Оплата прошла успешно',
+            order: r.rows[0],
+        });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.put('/api/orders/:id/status', staffOnly(), async (req, res) => {
+    try {
+        const { status } = req.body;
+        const allowed = ['pending', 'paid', 'shipped', 'done', 'cancelled'];
+        if (!allowed.includes(status)) {
+            return res.status(400).json({ error: 'Недопустимый статус' });
+        }
+
+        const current = await pool.query(
+            'SELECT status FROM orders WHERE order_id = $1',
+            [req.params.id]
+        );
+        if (!current.rows.length) return res.status(404).json({ error: 'Заказ не найден' });
+
+        const cur = current.rows[0].status;
+
+        if (cur === 'paid' && status === 'pending') {
+            return res.status(403).json({ error: 'Нельзя вернуть заказ с "Оплачено" обратно в "Ожидает оплаты"' });
+        }
+        if (cur === 'done' || cur === 'cancelled') {
+            return res.status(403).json({ error: 'Заказ уже закрыт' });
+        }
+
+        const r = await pool.query(
+            `UPDATE orders SET status = $1,
+                    paid_at = CASE WHEN $1 = 'paid' THEN NOW() ELSE paid_at END
+             WHERE order_id = $2
+             RETURNING order_id, user_order_number, status, paid_at`,
+            [status, req.params.id]
+        );
+        res.json(r.rows[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/orders/:id', staffOnly(), (_req, res) => {
+    res.status(403).json({ error: 'Удаление заказов и чеков запрещено. Обратитесь к администратору БД.' });
 });
 
 // =========================================================
@@ -671,42 +1067,116 @@ app.post('/api/services/:slug/reviews', auth(), async (req, res) => {
     try {
         const { rating, comment } = req.body;
         const r = Number(rating);
-        if (!r || r < 1 || r > 5) {
-            return res.status(400).json({ error: 'Оценка от 1 до 5' });
+        if (!r || r < 1 || r > 5) return res.status(400).json({ error: 'Оценка от 1 до 5' });
+
+        const trimmed = (comment || '').trim();
+        if (trimmed.length === 0) return res.status(400).json({ error: 'Отзыв не может быть пустым' });
+        if (trimmed.length < 5) return res.status(400).json({ error: 'Отзыв слишком короткий (минимум 5 символов)' });
+        if (trimmed.length > 1000) return res.status(400).json({ error: 'Отзыв слишком длинный (максимум 1000 символов)' });
+        if (containsBadWords(trimmed)) {
+            return res.status(400).json({ error: 'Отзыв содержит недопустимые выражения' });
         }
 
-        const srv = await pool.query(
-            'SELECT service_id FROM services WHERE slug = $1',
-            [req.params.slug]
-        );
+        const srv = await pool.query('SELECT service_id FROM services WHERE slug = $1', [req.params.slug]);
         if (!srv.rows.length) return res.status(404).json({ error: 'Товар не найден' });
 
-        const exists = await pool.query(
-            'SELECT 1 FROM reviews WHERE user_id = $1 AND service_id = $2',
+        const purchase = await pool.query(
+            `SELECT 1 FROM order_items oi
+             JOIN orders o ON oi.order_id = o.order_id
+             WHERE o.user_id = $1
+               AND oi.service_id = $2
+               AND o.status <> 'cancelled'
+             LIMIT 1`,
             [req.user.userId, srv.rows[0].service_id]
         );
-        if (exists.rows.length) {
+        if (!purchase.rows.length) {
+            return res.status(403).json({ error: 'Оставить отзыв можно только после покупки этого товара' });
+        }
+
+        const exists = await pool.query(
+            'SELECT review_id, deleted_by_admin FROM reviews WHERE user_id = $1 AND service_id = $2',
+            [req.user.userId, srv.rows[0].service_id]
+        );
+        if (exists.rows.length && !exists.rows[0].deleted_by_admin) {
             return res.status(400).json({ error: 'Вы уже оставляли отзыв на этот товар' });
         }
 
-        await pool.query(
-            `INSERT INTO reviews (user_id, service_id, rating, comment)
-             VALUES ($1, $2, $3, $4)`,
-            [req.user.userId, srv.rows[0].service_id, r, comment || null]
-        );
+        if (exists.rows.length && exists.rows[0].deleted_by_admin) {
+            await pool.query(
+                `UPDATE reviews SET rating = $1, comment = $2, created_at = NOW(),
+                                     updated_at = NULL, deleted_by_admin = FALSE, deleted_reason = NULL
+                 WHERE review_id = $3`,
+                [r, trimmed, exists.rows[0].review_id]
+            );
+        } else {
+            await pool.query(
+                `INSERT INTO reviews (user_id, service_id, rating, comment)
+                 VALUES ($1, $2, $3, $4)`,
+                [req.user.userId, srv.rows[0].service_id, r, trimmed]
+            );
+        }
         res.status(201).json({ message: 'Отзыв добавлен' });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/services/:slug/reviews', adminOnly(), async (req, res) => {
+app.get('/api/reviews/my', auth(), async (req, res) => {
     try {
-        await pool.query(
-            `DELETE FROM reviews WHERE service_id = (
-                SELECT service_id FROM services WHERE slug = $1
-            )`,
-            [req.params.slug]
+        const r = await pool.query(
+            `SELECT r.review_id, r.rating, r.comment,
+                    r.created_at, r.updated_at,
+                    r.deleted_by_admin, r.deleted_reason,
+                    s.slug AS service_slug, s.service_name, s.image_url
+             FROM reviews r
+             JOIN services s ON r.service_id = s.service_id
+             WHERE r.user_id = $1
+             ORDER BY r.created_at DESC`,
+            [req.user.userId]
         );
-        res.json({ message: 'Отзывы удалены' });
+        res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/reviews/:reviewId', auth(), async (req, res) => {
+    try {
+        const { rating, comment } = req.body;
+        const r = Number(rating);
+        if (!r || r < 1 || r > 5) return res.status(400).json({ error: 'Оценка от 1 до 5' });
+
+        const trimmed = (comment || '').trim();
+        if (trimmed.length < 5) return res.status(400).json({ error: 'Отзыв слишком короткий (минимум 5 символов)' });
+        if (trimmed.length > 1000) return res.status(400).json({ error: 'Отзыв слишком длинный (максимум 1000 символов)' });
+        if (containsBadWords(trimmed)) return res.status(400).json({ error: 'Отзыв содержит недопустимые выражения' });
+
+        const owner = await pool.query(
+            `SELECT user_id, deleted_by_admin FROM reviews WHERE review_id = $1`,
+            [req.params.reviewId]
+        );
+        if (!owner.rows.length) return res.status(404).json({ error: 'Отзыв не найден' });
+        if (owner.rows[0].user_id !== req.user.userId) return res.status(403).json({ error: 'Это не ваш отзыв' });
+        if (owner.rows[0].deleted_by_admin) return res.status(403).json({ error: 'Этот отзыв удалён администратором' });
+
+        await pool.query(
+            `UPDATE reviews SET rating = $1, comment = $2, updated_at = NOW()
+             WHERE review_id = $3`,
+            [r, trimmed, req.params.reviewId]
+        );
+        res.json({ message: 'Отзыв обновлён' });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/reviews/:reviewId', adminOnly(), async (req, res) => {
+    try {
+        const { reason } = req.body;
+        const r = await pool.query(
+            `UPDATE reviews SET deleted_by_admin = TRUE,
+                                deleted_reason = $1,
+                                comment = '[Отзыв удалён администратором за нарушение политики]'
+             WHERE review_id = $2
+             RETURNING review_id`,
+            [reason || 'Нарушение политики', req.params.reviewId]
+        );
+        if (!r.rows.length) return res.status(404).json({ error: 'Отзыв не найден' });
+        res.json({ message: 'Отзыв помечен как удалённый' });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -728,6 +1198,11 @@ app.put('/api/profile', auth(), async (req, res) => {
         let hash = null;
         if (password && password.length >= 6) hash = await bcrypt.hash(password, 10);
 
+        const phoneNormalized = phone ? normalizePhone(phone) : null;
+        if (phone && !phoneNormalized) {
+            return res.status(400).json({ error: 'Телефон должен быть в формате +7 (999) 123-45-67' });
+        }
+
         const r = await pool.query(
             `UPDATE users SET
                 email = COALESCE($1, email),
@@ -739,7 +1214,7 @@ app.put('/api/profile', auth(), async (req, res) => {
              WHERE user_id = $7
              RETURNING email, first_name, last_name, address, phone, discount_percent`,
             [email || null, first_name || null, last_name || null,
-             address || null, phone || null, hash, req.user.userId]
+             address || null, phoneNormalized, hash, req.user.userId]
         );
         res.json(r.rows[0]);
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -760,6 +1235,14 @@ app.get('/api/admin/users', adminOnly(), async (_req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.put('/api/admin/users/:email', adminOnly(), (_req, res) => {
+    res.status(403).json({ error: 'Изменение данных пользователей запрещено. Пользователь редактирует свой профиль сам.' });
+});
+
+app.delete('/api/admin/users/:email', adminOnly(), (_req, res) => {
+    res.status(403).json({ error: 'Удаление пользователей запрещено. Обратитесь к администратору БД.' });
+});
+
 app.put('/api/admin/users/:email/role', adminOnly(), async (req, res) => {
     try {
         const { role_name } = req.body;
@@ -769,9 +1252,7 @@ app.put('/api/admin/users/:email/role', adminOnly(), async (req, res) => {
         );
         if (!role.rows.length) return res.status(400).json({ error: 'Роль не существует' });
         if (role.rows[0].role_name === 'admin') {
-            return res.status(403).json({
-                error: 'Нельзя назначить роль администратора через интерфейс'
-            });
+            return res.status(403).json({ error: 'Нельзя назначить роль администратора через интерфейс' });
         }
 
         const target = await pool.query(
@@ -809,78 +1290,66 @@ app.put('/api/admin/users/:email/discount', adminOnly(), async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/admin/users/:email', adminOnly(), async (req, res) => {
-    try {
-        const check = await pool.query(
-            `SELECT r.role_name FROM users u
-             JOIN roles r ON u.role_id = r.role_id
-             WHERE u.email = $1`,
-            [req.params.email]
-        );
-        if (!check.rows.length) return res.status(404).json({ error: 'Пользователь не найден' });
-        if (check.rows[0].role_name === 'admin') {
-            return res.status(403).json({
-                error: 'Администраторов можно удалять только через БД'
-            });
-        }
-        await pool.query('DELETE FROM users WHERE email = $1', [req.params.email]);
-        res.json({ message: 'Пользователь удалён со всеми связанными данными' });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 // =========================================================
-// РОЛИ (только админ)
+// РОЛИ
 // =========================================================
 app.get('/api/roles', adminOnly(), async (_req, res) => {
     try {
-        const r = await pool.query(
-            'SELECT role_name, description FROM roles ORDER BY role_id'
-        );
+        const r = await pool.query('SELECT role_name, description FROM roles ORDER BY role_id');
         res.json(r.rows);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // =========================================================
-// КУПОНЫ (публичное чтение, защищённая запись)
+// КУПОНЫ
 // =========================================================
 app.get('/api/coupons', async (_req, res) => {
     try {
         const r = await pool.query(
-            `SELECT code, discount_percent, usage_limit, used_count, is_active
+            `SELECT code, discount_percent, usage_limit, used_count, is_active, first_order_only
              FROM coupons ORDER BY coupon_id`
         );
         res.json(r.rows);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/coupons/validate', async (req, res) => {
+app.get('/api/coupons/validate', auth(), async (req, res) => {
     try {
         const r = await pool.query(
-            `SELECT code, discount_percent FROM coupons
+            `SELECT code, discount_percent, first_order_only FROM coupons
              WHERE code = $1 AND is_active = TRUE
              AND (usage_limit IS NULL OR used_count < usage_limit)`,
             [req.query.code?.toUpperCase()]
         );
-        if (!r.rows.length) {
-            return res.status(404).json({ error: 'Купон не найден или неактивен' });
+        if (!r.rows.length) return res.status(404).json({ error: 'Купон не найден или неактивен' });
+
+        const coupon = r.rows[0];
+        if (coupon.first_order_only) {
+            const orders = await pool.query(
+                'SELECT COUNT(*)::int AS c FROM orders WHERE user_id = $1',
+                [req.user.userId]
+            );
+            if (orders.rows[0].c > 0) {
+                return res.status(400).json({ error: 'Этот купон доступен только на первый заказ' });
+            }
         }
-        res.json(r.rows[0]);
+        res.json(coupon);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/coupons', adminOnly(), async (req, res) => {
     try {
-        const { code, discount_percent, usage_limit } = req.body;
+        const { code, discount_percent, usage_limit, first_order_only } = req.body;
         const percent = parseInt(discount_percent, 10);
         if (!code || !code.trim()) return res.status(400).json({ error: 'Код обязателен' });
         if (!percent || percent < 1 || percent > 99) {
             return res.status(400).json({ error: 'Скидка от 1 до 99%' });
         }
         const r = await pool.query(
-            `INSERT INTO coupons (code, discount_percent, usage_limit)
-             VALUES ($1,$2,$3)
-             RETURNING code, discount_percent, usage_limit, used_count, is_active`,
-            [code.trim().toUpperCase(), percent, usage_limit || null]
+            `INSERT INTO coupons (code, discount_percent, usage_limit, first_order_only)
+             VALUES ($1,$2,$3,$4)
+             RETURNING code, discount_percent, usage_limit, used_count, is_active, first_order_only`,
+            [code.trim().toUpperCase(), percent, usage_limit || null, first_order_only === true]
         );
         res.status(201).json(r.rows[0]);
     } catch (e) {
@@ -891,18 +1360,18 @@ app.post('/api/coupons', adminOnly(), async (req, res) => {
 
 app.put('/api/coupons/:code', adminOnly(), async (req, res) => {
     try {
-        const { code, discount_percent, usage_limit, is_active } = req.body;
+        const { code, discount_percent, usage_limit, is_active, first_order_only } = req.body;
         const percent = parseInt(discount_percent, 10);
         if (!percent || percent < 1 || percent > 99) {
             return res.status(400).json({ error: 'Скидка от 1 до 99%' });
         }
         const r = await pool.query(
             `UPDATE coupons SET code = $1, discount_percent = $2,
-                                usage_limit = $3, is_active = $4
-             WHERE code = $5
-             RETURNING code, discount_percent, usage_limit, used_count, is_active`,
+                                usage_limit = $3, is_active = $4, first_order_only = $5
+             WHERE code = $6
+             RETURNING code, discount_percent, usage_limit, used_count, is_active, first_order_only`,
             [code.toUpperCase(), percent, usage_limit || null,
-             is_active !== false, req.params.code]
+             is_active !== false, first_order_only === true, req.params.code]
         );
         res.json(r.rows[0]);
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -931,15 +1400,12 @@ app.get('/api/certificates', async (_req, res) => {
 app.post('/api/certificates', adminOnly(), async (req, res) => {
     try {
         const { code, title, description, image_url, amount } = req.body;
-        if (!code || !title) {
-            return res.status(400).json({ error: 'Код и название обязательны' });
-        }
+        if (!code || !title) return res.status(400).json({ error: 'Код и название обязательны' });
         const r = await pool.query(
             `INSERT INTO certificates (code, title, description, image_url, amount)
              VALUES ($1,$2,$3,$4,$5)
              RETURNING code, title, description, image_url, amount, is_active`,
-            [code.toUpperCase(), title, description || null,
-             image_url || null, amount || null]
+            [code.toUpperCase(), title, description || null, image_url || null, amount || null]
         );
         res.status(201).json(r.rows[0]);
     } catch (e) {
@@ -971,7 +1437,7 @@ app.delete('/api/certificates/:code', adminOnly(), async (req, res) => {
 });
 
 // =========================================================
-// ЗАПИСИ (appointments) — админ и сотрудник
+// ЗАПИСИ
 // =========================================================
 app.get('/api/appointments', staffOnly(), async (_req, res) => {
     try {
@@ -988,7 +1454,7 @@ app.get('/api/appointments', staffOnly(), async (_req, res) => {
 });
 
 // =========================================================
-// ПОИСК — админ и сотрудник
+// ПОИСК
 // =========================================================
 app.get('/api/admin/search', staffOnly(), async (req, res) => {
     try {
@@ -1017,5 +1483,6 @@ app.get('/api/admin/search', staffOnly(), async (req, res) => {
 // =========================================================
 app.listen(PORT, () => {
     console.log(`Сервер запущен на http://localhost:${PORT}`);
-    console.log(`JWT_SECRET задан: ${process.env.JWT_SECRET ? 'да' : 'НЕТ (используется дефолтный!)'}`);
+    console.log(`JWT_SECRET задан: ${process.env.JWT_SECRET ? 'да' : 'НЕТ'}`);
+    console.log(`MAIL настроен: ${process.env.MAIL_USER ? 'да' : 'нет (коды в консоль)'}`);
 });

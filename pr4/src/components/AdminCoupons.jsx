@@ -6,6 +6,7 @@ export default function AdminCoupons() {
     const [newCode, setNewCode] = useState('');
     const [newPercent, setNewPercent] = useState('');
     const [newLimit, setNewLimit] = useState('');
+    const [newFirstOnly, setNewFirstOnly] = useState(false);
     const [editingCode, setEditingCode] = useState(null);
     const [editData, setEditData] = useState({});
     const [loading, setLoading] = useState(false);
@@ -29,21 +30,25 @@ export default function AdminCoupons() {
     async function handleCreate(e) {
         e.preventDefault();
         const percent = parseInt(newPercent, 10);
+
         if (!newCode.trim()) return;
         if (!percent || percent < 1 || percent > 99) {
             showMessage('error', 'Скидка от 1 до 99%');
             return;
         }
+
         try {
             setLoading(true);
             await api.addCoupon({
                 code: newCode.trim(),
                 discount_percent: percent,
                 usage_limit: newLimit ? parseInt(newLimit, 10) : null,
+                first_order_only: newFirstOnly,
             });
             setNewCode('');
             setNewPercent('');
             setNewLimit('');
+            setNewFirstOnly(false);
             showMessage('success', 'Купон создан');
             load();
         } catch (err) {
@@ -60,6 +65,7 @@ export default function AdminCoupons() {
             discount_percent: c.discount_percent,
             usage_limit: c.usage_limit || '',
             is_active: c.is_active,
+            first_order_only: c.first_order_only || false,
         });
     }
 
@@ -74,6 +80,7 @@ export default function AdminCoupons() {
             showMessage('error', 'Скидка от 1 до 99%');
             return;
         }
+
         try {
             setLoading(true);
             await api.updateCoupon(originalCode, {
@@ -81,6 +88,7 @@ export default function AdminCoupons() {
                 discount_percent: percent,
                 usage_limit: editData.usage_limit ? parseInt(editData.usage_limit, 10) : null,
                 is_active: editData.is_active,
+                first_order_only: editData.first_order_only,
             });
             setEditingCode(null);
             showMessage('success', 'Купон обновлён');
@@ -93,7 +101,7 @@ export default function AdminCoupons() {
     }
 
     async function handleDelete(code) {
-        if (!confirm('Удалить купон?')) return;
+        if (!confirm(`Удалить купон "${code}"?`)) return;
         try {
             await api.deleteCoupon(code);
             showMessage('success', 'Купон удалён');
@@ -107,14 +115,17 @@ export default function AdminCoupons() {
         <section className="admin-section">
             <div className="admin-section-header">
                 <h2>Купоны на скидку</h2>
-                <p className="admin-section-hint">Максимальная скидка — 99%</p>
+                <p className="admin-section-hint">
+                    Максимальная скидка — 99%.
+                    «Только на первый заказ» — купон сработает лишь у тех, у кого ещё нет заказов.
+                </p>
             </div>
 
             {message.text && (
                 <div className={`admin-message ${message.type}`}>{message.text}</div>
             )}
 
-            <form onSubmit={handleCreate} className="admin-form-row">
+            <form onSubmit={handleCreate} className="admin-form-row admin-form-row-coupons">
                 <input
                     type="text"
                     placeholder="Код (например, VIP20)"
@@ -136,6 +147,14 @@ export default function AdminCoupons() {
                     onChange={(e) => setNewLimit(e.target.value)}
                     min="1"
                 />
+                <label className="admin-switch">
+                    <input
+                        type="checkbox"
+                        checked={newFirstOnly}
+                        onChange={(e) => setNewFirstOnly(e.target.checked)}
+                    />
+                    <span>Только на первый заказ</span>
+                </label>
                 <button
                     className="btn-primary"
                     disabled={loading || !newCode.trim() || !newPercent}
@@ -150,6 +169,7 @@ export default function AdminCoupons() {
                     <div>Скидка</div>
                     <div>Использовано</div>
                     <div>Лимит</div>
+                    <div>Только 1-й</div>
                     <div>Статус</div>
                     <div>Действия</div>
                 </div>
@@ -186,6 +206,16 @@ export default function AdminCoupons() {
                                 <label className="admin-switch">
                                     <input
                                         type="checkbox"
+                                        checked={editData.first_order_only}
+                                        onChange={(e) =>
+                                            setEditData({ ...editData, first_order_only: e.target.checked })
+                                        }
+                                    />
+                                    <span>{editData.first_order_only ? 'Да' : 'Нет'}</span>
+                                </label>
+                                <label className="admin-switch">
+                                    <input
+                                        type="checkbox"
                                         checked={editData.is_active}
                                         onChange={(e) =>
                                             setEditData({ ...editData, is_active: e.target.checked })
@@ -211,6 +241,9 @@ export default function AdminCoupons() {
                                 <div className="admin-cell-badge">−{c.discount_percent}%</div>
                                 <div className="admin-cell-muted">{c.used_count}</div>
                                 <div className="admin-cell-muted">{c.usage_limit || '∞'}</div>
+                                <div className="admin-cell-muted">
+                                    {c.first_order_only ? 'Да' : '—'}
+                                </div>
                                 <div>
                                     <span className={c.is_active ? 'status-pill status-active' : 'status-pill status-inactive'}>
                                         {c.is_active ? 'Активен' : 'Выключен'}

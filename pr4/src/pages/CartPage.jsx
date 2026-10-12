@@ -8,7 +8,7 @@ import { getServiceImage } from '../utils/serviceImages';
 export default function CartPage() {
     const navigate = useNavigate();
     const { user } = useAuth();
-    const { cart, updateQty, remove } = useCart();
+    const { cart, updateQty, remove, error: cartError, loading: cartLoading } = useCart();
 
     const [couponCode, setCouponCode] = useState('');
     const [couponDiscount, setCouponDiscount] = useState(0);
@@ -17,12 +17,24 @@ export default function CartPage() {
 
     const [address, setAddress] = useState(user?.address || '');
     const [useAnotherAddress, setUseAnotherAddress] = useState(false);
-
     const [deliveryDate, setDeliveryDate] = useState('');
     const today = new Date().toISOString().split('T')[0];
 
     const [checkoutLoading, setCheckoutLoading] = useState(false);
     const [order, setOrder] = useState(null);
+
+    // Ошибка загрузки корзины с сервера
+    if (cartError && cart.length === 0 && !order) {
+        return (
+            <div className="cart-page">
+                <div className="empty-state">
+                    <h2>Не удалось загрузить корзину</h2>
+                    <p>{cartError}</p>
+                    <Link to="/" className="btn-primary">Вернуться в каталог</Link>
+                </div>
+            </div>
+        );
+    }
 
     if (cart.length === 0 && !order) {
         return (
@@ -40,7 +52,6 @@ export default function CartPage() {
         return <Receipt order={order} onBack={() => navigate('/profile')} />;
     }
 
-    // === Расчёты ===
     const totalOriginal = cart.reduce(
         (s, i) => s + parseFloat(i.price) * i.quantity, 0
     );
@@ -87,18 +98,9 @@ export default function CartPage() {
             ? address.trim()
             : (user?.address || '').trim();
 
-        if (!finalAddress) {
-            alert('Укажите адрес доставки');
-            return;
-        }
-        if (!deliveryDate) {
-            alert('Укажите дату доставки');
-            return;
-        }
-        if (deliveryDate < today) {
-            alert('Дата доставки не может быть в прошлом');
-            return;
-        }
+        if (!finalAddress) { alert('Укажите адрес доставки'); return; }
+        if (!deliveryDate) { alert('Укажите дату доставки'); return; }
+        if (deliveryDate < today) { alert('Дата доставки не может быть в прошлом'); return; }
 
         setCheckoutLoading(true);
         try {
@@ -246,9 +248,6 @@ export default function CartPage() {
                             onChange={(e) => setDeliveryDate(e.target.value)}
                             required
                         />
-                        <small style={{ color: '#888' }}>
-                            Дата не может быть раньше сегодняшней
-                        </small>
                     </div>
 
                     <div className="cart-summary">
@@ -289,7 +288,7 @@ export default function CartPage() {
                     <button
                         className="checkout-btn"
                         onClick={handleCheckout}
-                        disabled={checkoutLoading}
+                        disabled={checkoutLoading || cartLoading}
                     >
                         {checkoutLoading ? 'Оформление...' : 'Оформить заказ'}
                     </button>
@@ -318,6 +317,9 @@ function Receipt({ order, onBack }) {
             <div className="receipt">
                 <div className="receipt-header">
                     <h2>Заказ оформлен</h2>
+                    <p className="receipt-number">
+                        Заказ №{order.user_order_number}
+                    </p>
                     <p className="receipt-date">
                         {new Date(order.created_at || Date.now()).toLocaleString('ru-RU')}
                     </p>

@@ -15,6 +15,7 @@ export default function Menu() {
             <nav>
                 <NavLink to="/" end>Каталог</NavLink>
                 <NavLink to="/cart">Корзина {totalCount > 0 && `(${totalCount})`}</NavLink>
+                <NavLink to="/my-reviews">Мои отзывы</NavLink>
                 <NavLink to="/profile">Профиль</NavLink>
             </nav>
 

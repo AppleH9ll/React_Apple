@@ -647,8 +647,45 @@ body {
 .order-date { font-size: 12px; color: var(--text-muted); }
 .order-header-center { display: flex; gap: 10px; align-items: center; }
 .order-items-count { background: rgba(102, 126, 234, 0.15); color: var(--accent); padding: 3px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; }
-.order-status { padding: 3px 10px; border-radius: 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; background: #fff3cd; color: #856404; }
-.order-header-right { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+.order-status {
+    padding: 3px 10px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.order-status.status-pending {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.order-status.status-paid {
+    background: #d4edda;
+    color: #155724;
+}
+
+.order-status.status-shipped {
+    background: #cce5ff;
+    color: #004085;
+}
+
+.order-status.status-done {
+    background: #d1e7dd;
+    color: #0f5132;
+}
+
+.order-status.status-cancelled {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+[data-theme='dark'] .order-status.status-pending   { background: #4a3a10; color: #ffd700; }
+[data-theme='dark'] .order-status.status-paid      { background: #1e3a2e; color: #7dd87d; }
+[data-theme='dark'] .order-status.status-shipped   { background: #1e2a4a; color: #79b8ff; }
+[data-theme='dark'] .order-status.status-done      { background: #1e3a2e; color: #7dd87d; }
+[data-theme='dark'] .order-status.status-cancelled { background: #4a1f1f; color: #ff8888; }.order-header-right { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
 .order-old-sum { text-decoration: line-through; color: var(--text-muted); font-size: 13px; }
 .order-final-sum { font-weight: 700; color: var(--text); font-size: 16px; }
 .order-chevron { color: var(--text-muted); transition: 0.2s; }
@@ -1137,4 +1174,507 @@ body {
   .admin-form-row,
   .admin-form-grid { grid-template-columns: 1fr; }
   .admin-search-bar { grid-template-columns: 1fr; }
+}
+/* =========================================================
+   ЖИВОЙ ПОИСК (DNS-стиль)
+   ========================================================= */
+.live-search {
+  position: relative;
+  width: 100%;
+  max-width: 500px;
+}
+
+.live-search input {
+  width: 100%;
+  padding: 12px 16px 12px 42px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  transition: 0.15s;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%236b7280" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>');
+  background-repeat: no-repeat;
+  background-position: 14px center;
+  background-size: 18px;
+}
+.live-search input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+}
+
+.live-search-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  max-height: 420px;
+  overflow-y: auto;
+  z-index: 200;
+  padding: 6px;
+}
+
+.live-search-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  transition: 0.12s;
+  text-decoration: none;
+  color: var(--text);
+}
+.live-search-item:hover {
+  background: var(--bg);
+}
+
+.live-search-item img {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  background: #f7f9fc;
+  border-radius: 6px;
+  padding: 4px;
+  flex-shrink: 0;
+}
+[data-theme='dark'] .live-search-item img { background: #262832; }
+
+.live-search-info {
+  flex: 1;
+  min-width: 0;
+}
+.live-search-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.live-search-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.live-search-price {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.live-search-price.old {
+  color: var(--danger);
+}
+
+.live-search-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.live-search-loading {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.admin-form-row-coupons {
+    grid-template-columns: 1.2fr 0.8fr 0.8fr 1.2fr auto;
+    align-items: center;
+}
+
+.admin-table-head-coupons {
+    grid-template-columns: 1fr 100px 110px 100px 100px 130px 220px;
+}
+
+.admin-table-row-coupons {
+    grid-template-columns: 1fr 100px 110px 100px 100px 130px 220px;
+    align-items: center;
+}
+
+@media (max-width: 900px) {
+    .admin-form-row-coupons,
+    .admin-table-head-coupons,
+    .admin-table-row-coupons {
+        grid-template-columns: 1fr;
+    }
+}
+/* =========================================================
+   МОИ ОТЗЫВЫ
+   ========================================================= */
+.my-reviews-page {
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.my-reviews-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.my-review-card {
+  background: var(--panel);
+  border-radius: 12px;
+  padding: 18px 20px;
+  box-shadow: var(--shadow);
+  border-left: 4px solid var(--accent);
+}
+
+.my-review-product {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  margin-bottom: 12px;
+  color: inherit;
+}
+
+.my-review-product img {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  background: #f7f9fc;
+  border-radius: 8px;
+  padding: 4px;
+  flex-shrink: 0;
+}
+[data-theme='dark'] .my-review-product img {
+  background: #262832;
+}
+
+.my-review-product-name {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 15px;
+  margin-bottom: 2px;
+}
+.my-review-product:hover .my-review-product-name {
+  color: var(--accent);
+}
+
+.my-review-date {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.my-review-rating {
+  font-size: 18px;
+  color: #ffb300;
+  letter-spacing: 2px;
+  margin-bottom: 6px;
+}
+
+.my-review-text {
+  margin: 0 0 12px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.my-review-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.my-review-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.my-review-edit label {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.my-review-edit select,
+.my-review-edit textarea {
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+}
+
+.my-review-edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.my-review-deleted {
+  background: #fff3cd;
+  border-left: 3px solid #d35400;
+  padding: 12px 14px;
+  border-radius: 8px;
+  color: #856404;
+  font-size: 13px;
+}
+[data-theme='dark'] .my-review-deleted {
+  background: #4a3a10;
+  color: #ffd700;
+}
+.my-review-deleted p {
+  margin: 4px 0 0;
+}
+
+/* =========================================================
+   РЕДАКТИРОВАНИЕ ОТЗЫВА НА СТРАНИЦЕ ТОВАРА
+   ========================================================= */
+.review-mine-badge {
+  margin-left: 8px;
+  background: var(--accent);
+  color: white;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.review-deleted {
+  background: #fff3cd;
+  border-left: 3px solid #d35400;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #856404;
+}
+[data-theme='dark'] .review-deleted {
+  background: #4a3a10;
+  color: #ffd700;
+}
+.review-deleted p {
+  margin: 4px 0 0;
+}
+
+.review-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+.review-edit-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.review-edit-form select,
+.review-edit-form textarea {
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+}
+.review-edit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.review-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.add-to-cart-btn:disabled {
+  background: #cbd5e0;
+  color: #4a5568;
+  cursor: not-allowed;
+  opacity: 0.9;
+}
+/* Пояснение "Отзыв только после покупки" */
+.review-notice {
+  background: #eef4ff;
+  border-left: 4px solid #667eea;
+  color: #3b4b8c;
+  padding: 14px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+[data-theme='dark'] .review-notice {
+  background: #1e2540;
+  color: #a8b5e0;
+}
+/* =========================================================
+   МОДАЛЬНОЕ ОКНО ОПЛАТЫ
+   ========================================================= */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.modal {
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 16px;
+  padding: 28px;
+  width: 100%;
+  max-width: 460px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.35);
+  animation: modalIn 0.2s ease;
+}
+
+@keyframes modalIn {
+  from { transform: scale(0.95); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+.modal h2 {
+  margin: 0 0 6px;
+  color: var(--text);
+  font-size: 20px;
+}
+
+.modal-subtitle {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+
+.modal-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin: 14px 0 6px;
+}
+
+.modal-input {
+  width: 100%;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 1px;
+  transition: 0.15s;
+}
+.modal-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+}
+
+.modal-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.modal-error {
+  background: #ffe2e2;
+  color: var(--danger);
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-top: 14px;
+}
+[data-theme='dark'] .modal-error {
+  background: #4a1f1f;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 22px;
+}
+.modal-actions button {
+  flex: 1;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  transition: 0.15s;
+}
+.btn-pay-confirm {
+  background: linear-gradient(135deg, #27ae60, #2ecc71);
+  color: white;
+}
+.btn-pay-confirm:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.btn-pay-cancel {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border) !important;
+}
+
+.pay-card-preview {
+  background: linear-gradient(135deg, #1e3c72, #2a5298);
+  color: white;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+  font-family: 'Courier New', monospace;
+  position: relative;
+  overflow: hidden;
+}
+.pay-card-preview::after {
+  content: '';
+  position: absolute;
+  top: -40px;
+  right: -40px;
+  width: 120px;
+  height: 120px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 50%;
+}
+.pay-card-chip {
+  width: 40px;
+  height: 30px;
+  background: linear-gradient(135deg, #ffd700, #d4af37);
+  border-radius: 6px;
+  margin-bottom: 18px;
+}
+.pay-card-number {
+  font-size: 18px;
+  letter-spacing: 3px;
+  margin-bottom: 18px;
+  color: white;
+}
+.pay-card-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.7);
+}
+.pay-card-meta span {
+  color: white;
+  font-size: 13px;
+  display: block;
+  margin-top: 4px;
 }

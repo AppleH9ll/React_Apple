@@ -8,47 +8,93 @@ export function CartProvider({ children }) {
     const { user } = useAuth();
     const [cart, setCart] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
 
+    // Сотрудник и админ не имеют корзины
     const isStaff = user?.role_name === 'admin' || user?.role_name === 'employee';
     const canShop = user && !isStaff;
 
     const reload = useCallback(async () => {
-        if (!canShop) { setCart([]); return; }
+        if (!canShop) {
+            setCart([]);
+            setError('');
+            return;
+        }
         try {
             setLoading(true);
-            setCart(await api.getCart());
+            setError('');
+            const data = await api.getCart();
+            setCart(data);
         } catch (err) {
-            console.error('Ошибка загрузки корзины:', err);
+            setError(err.message);
+            setCart([]);
         } finally {
             setLoading(false);
         }
     }, [canShop]);
 
-    useEffect(() => { reload(); }, [reload]);
+    useEffect(() => {
+        reload();
+    }, [reload]);
 
     const add = async (slug, quantity = 1) => {
         if (!canShop) throw new Error('Сотрудники и администраторы не могут добавлять товары');
-        await api.addToCart(slug, quantity);
-        await reload();
+        setError('');
+        try {
+            await api.addToCart(slug, quantity);
+            await reload();
+        } catch (err) {
+            setError(err.message);
+            throw err;
+        }
     };
+
     const updateQty = async (slug, quantity) => {
-        await api.updateCartQuantity(slug, quantity);
-        await reload();
+        if (!canShop) throw new Error('Нет доступа к корзине');
+        setError('');
+        try {
+            await api.updateCartQuantity(slug, quantity);
+            await reload();
+        } catch (err) {
+            setError(err.message);
+            throw err;
+        }
     };
+
     const remove = async (slug) => {
-        await api.removeFromCart(slug);
-        await reload();
+        if (!canShop) throw new Error('Нет доступа к корзине');
+        setError('');
+        try {
+            await api.removeFromCart(slug);
+            await reload();
+        } catch (err) {
+            setError(err.message);
+            throw err;
+        }
     };
+
     const clear = async () => {
-        await api.clearCart();
-        await reload();
+        if (!canShop) throw new Error('Нет доступа к корзине');
+        setError('');
+        try {
+            await api.clearCart();
+            await reload();
+        } catch (err) {
+            setError(err.message);
+            throw err;
+        }
     };
 
     const totalCount = cart.reduce((sum, i) => sum + i.quantity, 0);
 
     return (
         <CartContext.Provider
-            value={{ cart, loading, totalCount, add, updateQty, remove, clear, reload, isStaff, canShop }}
+            value={{
+                cart, loading, error,
+                totalCount,
+                add, updateQty, remove, clear, reload,
+                isStaff, canShop,
+            }}
         >
             {children}
         </CartContext.Provider>

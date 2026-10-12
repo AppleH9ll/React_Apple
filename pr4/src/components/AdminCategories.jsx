@@ -6,9 +6,11 @@ export default function AdminCategories() {
     const [services, setServices] = useState([]);
     const [newName, setNewName] = useState('');
     const [newDesc, setNewDesc] = useState('');
+    const [newLimit, setNewLimit] = useState(10);
     const [editingSlug, setEditingSlug] = useState(null);
     const [editName, setEditName] = useState('');
     const [editDesc, setEditDesc] = useState('');
+    const [editLimit, setEditLimit] = useState(10);
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState({ type: '', text: '' });
 
@@ -44,9 +46,11 @@ export default function AdminCategories() {
             await api.addCategory({
                 category_name: newName.trim(),
                 description: newDesc.trim(),
+                daily_limit: Number(newLimit),
             });
             setNewName('');
             setNewDesc('');
+            setNewLimit(10);
             showMessage('success', 'Категория добавлена');
             await load();
         } catch (err) {
@@ -60,12 +64,14 @@ export default function AdminCategories() {
         setEditingSlug(c.slug);
         setEditName(c.category_name);
         setEditDesc(c.description || '');
+        setEditLimit(c.daily_limit || 10);
     }
 
     function cancelEdit() {
         setEditingSlug(null);
         setEditName('');
         setEditDesc('');
+        setEditLimit(10);
     }
 
     async function handleUpdate(slug) {
@@ -75,6 +81,7 @@ export default function AdminCategories() {
             await api.updateCategory(slug, {
                 category_name: editName.trim(),
                 description: editDesc.trim(),
+                daily_limit: Number(editLimit),
             });
             setEditingSlug(null);
             showMessage('success', 'Категория обновлена');
@@ -87,37 +94,25 @@ export default function AdminCategories() {
     }
 
     async function handleDelete(category) {
-        const count = countServices(category.slug);
-
-        if (count === 0) {
-            if (!confirm(`Удалить категорию "${category.category_name}"?`)) return;
-            try {
-                setLoading(true);
-                await api.deleteCategory(category.slug, false);
-                showMessage('success', 'Категория удалена');
-                await load();
-            } catch (err) {
-                showMessage('error', err.message);
-            } finally {
-                setLoading(false);
-            }
+        if (category.slug === 'no-category') {
+            showMessage('error', 'Категорию "Без категории" удалять нельзя');
             return;
         }
 
+        const count = countServices(category.slug);
         const confirmed = confirm(
-            `В категории "${category.category_name}" ${count} товар(ов).\n\n` +
-            `ВНИМАНИЕ: все они будут удалены вместе с категорией.\n` +
-            `Продолжить каскадное удаление?`
+            count > 0
+                ? `В категории "${category.category_name}" ${count} товар(ов).\n\n` +
+                  `Товары будут перенесены в категорию "Без категории".\n\n` +
+                  `Продолжить удаление категории?`
+                : `Удалить категорию "${category.category_name}"?`
         );
         if (!confirmed) return;
 
         try {
             setLoading(true);
-            const result = await api.deleteCategory(category.slug, true);
-            showMessage(
-                'success',
-                result.message || `Категория удалена. Товаров удалено: ${count}`
-            );
+            const result = await api.deleteCategory(category.slug);
+            showMessage('success', result.message || 'Категория удалена');
             await load();
         } catch (err) {
             showMessage('error', err.message);
@@ -131,8 +126,8 @@ export default function AdminCategories() {
             <div className="admin-section-header">
                 <h2>Категории товаров</h2>
                 <p className="admin-section-hint">
-                    Названия категорий должны быть уникальны.
-                    При удалении категории с товарами — они удаляются каскадно.
+                    При удалении категории её товары переносятся в «Без категории».
+                    Дневной лимит — максимальное количество товаров этой категории в одном заказе.
                 </p>
             </div>
 
@@ -140,7 +135,7 @@ export default function AdminCategories() {
                 <div className={`admin-message ${message.type}`}>{message.text}</div>
             )}
 
-            <form onSubmit={handleCreate} className="admin-form-row">
+            <form onSubmit={handleCreate} className="admin-form-row admin-form-row-categories">
                 <input
                     type="text"
                     placeholder="Название новой категории"
@@ -154,6 +149,15 @@ export default function AdminCategories() {
                     value={newDesc}
                     onChange={(e) => setNewDesc(e.target.value)}
                     disabled={loading}
+                />
+                <input
+                    type="number"
+                    min="1"
+                    placeholder="Дневной лимит"
+                    value={newLimit}
+                    onChange={(e) => setNewLimit(e.target.value)}
+                    disabled={loading}
+                    style={{ maxWidth: '140px' }}
                 />
                 <button
                     type="submit"
@@ -169,12 +173,14 @@ export default function AdminCategories() {
                     <div>Название</div>
                     <div>Описание</div>
                     <div>Товаров</div>
+                    <div>Лимит/день</div>
                     <div>Действия</div>
                 </div>
 
                 {categories.map(cat => {
                     const count = countServices(cat.slug);
                     const isEditing = editingSlug === cat.slug;
+                    const isSystem = cat.slug === 'no-category';
 
                     return (
                         <div
@@ -183,21 +189,17 @@ export default function AdminCategories() {
                         >
                             {isEditing ? (
                                 <>
-                                    <input
-                                        value={editName}
-                                        onChange={(e) => setEditName(e.target.value)}
-                                    />
-                                    <input
-                                        value={editDesc}
-                                        onChange={(e) => setEditDesc(e.target.value)}
-                                    />
+                                    <input value={editName} onChange={(e) => setEditName(e.target.value)} />
+                                    <input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} />
                                     <div className="admin-cell-muted">{count}</div>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        value={editLimit}
+                                        onChange={(e) => setEditLimit(e.target.value)}
+                                    />
                                     <div className="admin-row-actions">
-                                        <button
-                                            className="btn-save"
-                                            onClick={() => handleUpdate(cat.slug)}
-                                            disabled={loading}
-                                        >
+                                        <button className="btn-save" onClick={() => handleUpdate(cat.slug)}>
                                             Сохранить
                                         </button>
                                         <button className="btn-cancel" onClick={cancelEdit}>
@@ -209,30 +211,24 @@ export default function AdminCategories() {
                                 <>
                                     <div className="admin-cell-strong">
                                         {cat.category_name}
+                                        {isSystem && ' (служебная)'}
                                     </div>
-                                    <div className="admin-cell-muted">
-                                        {cat.description || '—'}
-                                    </div>
+                                    <div className="admin-cell-muted">{cat.description || '—'}</div>
                                     <div>
                                         <span className={count > 0 ? 'admin-cell-badge' : 'admin-cell-muted'}>
                                             {count}
                                         </span>
                                     </div>
+                                    <div className="admin-cell-muted">{cat.daily_limit || 10} шт.</div>
                                     <div className="admin-row-actions">
-                                        <button
-                                            className="btn-edit"
-                                            onClick={() => startEdit(cat)}
-                                            disabled={loading}
-                                        >
+                                        <button className="btn-edit" onClick={() => startEdit(cat)}>
                                             Изменить
                                         </button>
-                                        <button
-                                            className="btn-delete"
-                                            onClick={() => handleDelete(cat)}
-                                            disabled={loading}
-                                        >
-                                            Удалить
-                                        </button>
+                                        {!isSystem && (
+                                            <button className="btn-delete" onClick={() => handleDelete(cat)}>
+                                                Удалить
+                                            </button>
+                                        )}
                                     </div>
                                 </>
                             )}

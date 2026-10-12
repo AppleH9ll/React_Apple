@@ -1,9 +1,8 @@
 const API = 'http://localhost:3001/api';
 
 const SERVER_DOWN_MESSAGE =
-    '⚠️ Сервер временно недоступен. Возможно, ведутся технические работы. Попробуйте через пару минут.';
+    'Сервер временно недоступен. Возможно, ведутся технические работы. Попробуйте через пару минут.';
 
-// Токен хранится в памяти модуля. Устанавливается через setToken.
 let _token = localStorage.getItem('shop_token') || null;
 
 export function setToken(token) {
@@ -13,7 +12,7 @@ export function setToken(token) {
 }
 
 async function request(url, options = {}) {
-    const { method = 'GET', body, auth: needAuth = false } = options;
+    const { method = 'GET', body } = options;
 
     let response;
     try {
@@ -44,7 +43,13 @@ export const api = {
         request('/auth/login', { method: 'POST', body: { email, password } }),
     register: (data) =>
         request('/auth/register', { method: 'POST', body: data }),
-    me: () => request('/auth/me', { auth: true }),
+    me: () => request('/auth/me'),
+
+    // --- Сброс пароля ---
+    forgotPassword: (email) =>
+        request('/auth/forgot-password', { method: 'POST', body: { email } }),
+    resetPassword: (email, code, new_password) =>
+        request('/auth/reset-password', { method: 'POST', body: { email, code, new_password } }),
 
     // --- Каталог ---
     services: (filters = {}) => {
@@ -66,8 +71,7 @@ export const api = {
     categories: () => request('/categories'),
     addCategory: (data) => request('/categories', { method: 'POST', body: data }),
     updateCategory: (slug, data) => request(`/categories/${slug}`, { method: 'PUT', body: data }),
-    deleteCategory: (slug, cascade = false) =>
-        request(`/categories/${slug}${cascade ? '?cascade=true' : ''}`, { method: 'DELETE' }),
+    deleteCategory: (slug) => request(`/categories/${slug}`, { method: 'DELETE' }),
 
     // --- Корзина ---
     getCart: () => request('/cart'),
@@ -82,10 +86,19 @@ export const api = {
     createOrder: (coupon_code, address, delivery_date) =>
         request('/orders', { method: 'POST', body: { coupon_code, address, delivery_date } }),
     myOrders: () => request('/orders'),
+    payOrder: (id, cardData) =>
+        request(`/orders/${id}/pay`, { method: 'POST', body: cardData }),
+    updateOrderStatus: (id, status) =>
+        request(`/orders/${id}/status`, { method: 'PUT', body: { status } }),
 
     // --- Отзывы ---
     addReview: (slug, rating, comment) =>
         request(`/services/${slug}/reviews`, { method: 'POST', body: { rating, comment } }),
+    myReviews: () => request('/reviews/my'),
+    updateReview: (reviewId, rating, comment) =>
+        request(`/reviews/${reviewId}`, { method: 'PUT', body: { rating, comment } }),
+    deleteReview: (reviewId, reason) =>
+        request(`/reviews/${reviewId}`, { method: 'DELETE', body: { reason } }),
 
     // --- Купоны ---
     validateCoupon: (code) => request(`/coupons/validate?code=${encodeURIComponent(code)}`),
@@ -103,13 +116,14 @@ export const api = {
     // --- Профиль ---
     updateProfile: (data) => request('/profile', { method: 'PUT', body: data }),
 
-    // --- Админ ---
+    // --- Админ: пользователи ---
     adminUsers: () => request('/admin/users'),
     adminUpdateRole: (email, role_name) =>
         request(`/admin/users/${email}/role`, { method: 'PUT', body: { role_name } }),
     adminUpdateDiscount: (email, discount_percent) =>
         request(`/admin/users/${email}/discount`, { method: 'PUT', body: { discount_percent } }),
-    adminDeleteUser: (email) => request(`/admin/users/${email}`, { method: 'DELETE' }),
+
+    // --- Роли, поиск, записи ---
     roles: () => request('/roles'),
     appointments: () => request('/appointments'),
     search: (type, q) => request(`/admin/search?type=${type}&q=${encodeURIComponent(q)}`),

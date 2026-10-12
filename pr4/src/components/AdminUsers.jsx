@@ -33,23 +33,6 @@ export default function AdminUsers() {
         setTimeout(() => { setMessage(''); setError(''); }, 4000);
     }
 
-    async function changeDiscount(u) {
-        const value = prompt('Скидка в % (0–99):', u.discount_percent || 0);
-        if (value === null) return;
-        const percent = Number(value);
-        if (Number.isNaN(percent) || percent < 0 || percent > 99) {
-            showMsg('Скидка должна быть от 0 до 99%', true);
-            return;
-        }
-        try {
-            await api.adminUpdateDiscount(u.email, percent);
-            await load();
-            showMsg('Скидка обновлена');
-        } catch (err) {
-            showMsg(err.message, true);
-        }
-    }
-
     async function changeRole(u) {
         if (u.role_name === 'admin') {
             showMsg('Роль администратора меняется только через БД', true);
@@ -62,9 +45,9 @@ export default function AdminUsers() {
             return;
         }
 
-        const options = available.map(r => `${r.role_name} — ${r.description || ''}`).join('\n');
+        const options = available.map(r => r.role_name).join(', ');
         const input = prompt(
-            `Смена роли для ${u.email}\nТекущая: ${u.role_name}\n\nВведите новую роль:\n${options}`
+            `Смена роли для ${u.email}\nТекущая: ${u.role_name}\nДоступные: ${options}`
         );
         if (!input) return;
 
@@ -83,36 +66,37 @@ export default function AdminUsers() {
         }
     }
 
-    async function removeUser(u) {
-        if (u.role_name === 'admin') {
-            showMsg('Администраторов можно удалять только через БД', true);
+    async function changeDiscount(u) {
+        const value = prompt('Скидка в % (0–99):', u.discount_percent || 0);
+        if (value === null) return;
+        const percent = Number(value);
+        if (Number.isNaN(percent) || percent < 0 || percent > 99) {
+            showMsg('Скидка должна быть от 0 до 99%', true);
             return;
         }
-        if (!confirm(
-            `Удалить пользователя ${u.email}?\n\n` +
-            `Все его заказы, корзина и отзывы будут удалены безвозвратно!`
-        )) return;
-
         try {
-            await api.adminDeleteUser(u.email);
+            await api.adminUpdateDiscount(u.email, percent);
             await load();
-            showMsg('Пользователь удалён вместе со всеми связанными данными');
+            showMsg('Скидка обновлена');
         } catch (err) {
             showMsg(err.message, true);
         }
     }
 
-    function roleLabel(roleName) {
-        if (roleName === 'admin') return 'Админ';
-        if (roleName === 'employee') return 'Сотрудник';
-        if (roleName === 'user') return 'Пользователь';
-        return roleName;
+    function roleLabel(name) {
+        if (name === 'admin') return 'Админ';
+        if (name === 'employee') return 'Сотрудник';
+        return 'Пользователь';
     }
 
     return (
         <section className="admin-section">
             <div className="admin-section-header">
                 <h1>Пользователи</h1>
+                <p className="admin-section-hint">
+                    Редактирование и удаление пользователей запрещено.
+                    Можно менять роль (Пользователь ↔ Сотрудник) и скидку.
+                </p>
             </div>
 
             {error && <div className="admin-message error">{error}</div>}
@@ -133,7 +117,7 @@ export default function AdminUsers() {
                     {users.map(u => (
                         <div className="admin-table-row admin-table-row-users" key={u.email}>
                             <span className="admin-cell-strong">
-                                {u.first_name || 'Без имени'} {u.last_name || ''}
+                                {u.first_name} {u.last_name}
                             </span>
                             <span className="admin-cell-muted">{u.email}</span>
                             <span>
@@ -141,20 +125,17 @@ export default function AdminUsers() {
                                     {roleLabel(u.role_name)}
                                 </span>
                             </span>
-                            <span>Скидка: {u.discount_percent}%</span>
+                            <span>{u.discount_percent}%</span>
                             <div className="admin-row-actions">
-                                <button className="btn-edit" onClick={() => changeDiscount(u)}>
-                                    Скидка
-                                </button>
                                 {u.role_name !== 'admin' && (
-                                    <>
-                                        <button className="btn-edit" onClick={() => changeRole(u)}>
-                                            Роль
-                                        </button>
-                                        <button className="btn-delete" onClick={() => removeUser(u)}>
-                                            Удалить
-                                        </button>
-                                    </>
+                                    <button className="btn-edit" onClick={() => changeRole(u)}>
+                                        Сменить роль
+                                    </button>
+                                )}
+                                {u.role_name !== 'admin' && (
+                                    <button className="btn-edit" onClick={() => changeDiscount(u)}>
+                                        Скидка
+                                    </button>
                                 )}
                             </div>
                         </div>
